@@ -1,0 +1,62 @@
+version: 2
+
+project_name: creght
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: creght
+    main: ./cmd/creght
+    binary: creght
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X bysir/creght-cli/internal/cli.version={{ .Version }}
+
+archives:
+  - id: default
+    ids:
+      - creght
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: creght-dev
+    name: creght-cli
+  draft: false
+  prerelease: auto

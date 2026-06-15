@@ -1,0 +1,58 @@
+{
+  "name": "creght-cli",
+  "version": "0.1.16",
+  "description": "Cregh CLI for syncing local site code with Cregh.",
+  "license": "MIT",
+  "homepage": "https://github.com/creght-dev/creght-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/creght-dev/creght-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/creght-dev/creght-cli/issues"
+  },
+  "bin": {
+    "creght": "bin/creght.js"
+  },
+  "exports": {
+    "./vite": {
+      "types": "./vite/index.d.ts",
+      "import": "./vite/index.js"
+    }
+  },
+  "scripts": {
+    "prepare:npm-binaries": "node scripts/prepare-npm-binaries.js",
+    "test:npm": "node scripts/install.js --check"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "vite/",
+    "vendor/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "esbuild": ">=0.20",
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
