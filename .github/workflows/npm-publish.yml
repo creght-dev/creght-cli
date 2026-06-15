@@ -47,6 +47,6 @@ jobs:
         run: npm run prepare:npm-binaries
 
       - name: Publish npm package
-        run: npm publish --provenance
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
