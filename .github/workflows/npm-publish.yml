@@ -1,0 +1,52 @@
+name: Publish npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.16"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Check npm package version
+        run: |
+          node -e 'const pkg=require("./package.json"); const tag="${{ inputs.tag }}".replace(/^v/, ""); if (pkg.version !== tag) { throw new Error(`package.json version ${pkg.version} does not match tag ${tag}`); }'
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ inputs.tag }}"
+          VERSION="${VERSION#v}"
+          mkdir -p dist
+          gh release download "${{ inputs.tag }}" --dir dist --pattern "creght_${VERSION}_*"
+
+      - name: Prepare npm binaries
+        run: npm run prepare:npm-binaries
+
+      - name: Publish npm package
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
