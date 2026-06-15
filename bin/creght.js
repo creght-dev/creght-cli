@@ -15,7 +15,7 @@ const result = spawnSync(binary, process.argv.slice(2), {
 if (result.error) {
   if (result.error.code === "ENOENT") {
     console.error(
-      "Cregh CLI binary is missing. Reinstall creght-cli and try again.",
+      "Creght CLI binary is missing. Reinstall creght-cli and try again.",
     );
   } else {
     console.error(result.error.message);

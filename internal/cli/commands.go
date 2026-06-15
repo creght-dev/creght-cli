@@ -44,12 +44,12 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	var showVersion bool
 	root := &cobra.Command{
 		Use:           "creght",
-		Short:         "Local bridge for Cregh site code",
+		Short:         "Local bridge for Creght site code",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Long: fmt.Sprintf(`Cregh CLI authenticates with Cregh, lists projects and sites,
+		Long: fmt.Sprintf(`Creght CLI authenticates with Creght, lists projects and sites,
 pulls remote site files into a local directory, pushes local changes back to
-Cregh, watches local files for sync, opens previews, and publishes sites.
+Creght, watches local files for sync, opens previews, and publishes sites.
 
 Current API host: %s`, helpAPIHost()),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +69,7 @@ Current API host: %s`, helpAPIHost()),
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download the current remote site files into a local directory.", runPull))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Push the current local directory snapshot to the remote site.", runPush))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local files and sync changes back to Cregh.", runSync))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local files and sync changes back to Creght.", runSync))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
@@ -128,8 +128,8 @@ func originalArgsAfter(rawArgs []string, path []string) []string {
 }
 
 func loginCommand(ctx context.Context, rawArgs []string) *cobra.Command {
-	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Cregh and save a CLI token.", runLogin, func(flags *pflag.FlagSet) {
-		flags.String("web", "", "Cregh web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or https://creght.cn.")
+	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Creght and save a CLI token.", runLogin, func(flags *pflag.FlagSet) {
+		flags.String("web", "", "Creght web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or https://creght.cn.")
 	})
 }
 
@@ -157,15 +157,15 @@ func siteCommand(ctx context.Context, rawArgs []string, name string, short strin
 func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
-		flags.String("dir", ".", "Local Cregh project directory.")
+		flags.String("dir", ".", "Local Creght project directory.")
 	})
 }
 
 func devCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{"dev"}, "dev", "Bidirectionally sync local files with the Web editor and run Vite preview.", runDev, func(flags *pflag.FlagSet) {
-		flags.String("web", "", "Cregh web host.")
+		flags.String("web", "", "Creght web host.")
 		addSiteIDFlag(flags)
-		flags.String("dir", ".", "Local Cregh project directory.")
+		flags.String("dir", ".", "Local Creght project directory.")
 		flags.Bool("no-preview", false, "Do not start a local Vite preview.")
 		flags.String("preview-host", "localhost", "Local Vite preview host.")
 		flags.Int("preview-port", 5173, "Preferred local Vite preview port.")
@@ -180,7 +180,7 @@ func publishCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 }
 
 func uploadCommand(ctx context.Context, rawArgs []string) *cobra.Command {
-	return legacyCommand(ctx, rawArgs, []string{"upload"}, "upload", "Upload a local file as a Cregh site asset and print its URL.", runUpload, func(flags *pflag.FlagSet) {
+	return legacyCommand(ctx, rawArgs, []string{"upload"}, "upload", "Upload a local file as a Creght site asset and print its URL.", runUpload, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
 		flags.String("file", "", "Local file path to upload.")
 		flags.String("name", "", "Uploaded file name.")

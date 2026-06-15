@@ -1,7 +1,7 @@
 {
   "name": "creght-cli",
   "version": "0.1.16",
-  "description": "Cregh CLI for syncing local site code with Cregh.",
+  "description": "Creght CLI for syncing local site code with Creght.",
   "license": "MIT",
   "homepage": "https://github.com/creght-dev/creght-cli#readme",
   "repository": {

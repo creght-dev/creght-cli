@@ -12,7 +12,7 @@ const checkOnly = process.argv.includes("--check");
 
 if (checkOnly) {
   const exists = fs.existsSync(binary);
-  console.log(`Cregh CLI binary path for this platform: ${binary}`);
+  console.log(`Creght CLI binary path for this platform: ${binary}`);
   if (!exists) {
     console.log("Binary is not present in this local checkout. CI adds release binaries before npm publish.");
   }
@@ -21,7 +21,7 @@ if (checkOnly) {
 
 if (!fs.existsSync(binary)) {
   console.error(
-    `Cregh CLI binary is missing for ${platform}-${arch}. Reinstall creght-cli and try again.`,
+    `Creght CLI binary is missing for ${platform}-${arch}. Reinstall creght-cli and try again.`,
   );
   process.exit(1);
 }

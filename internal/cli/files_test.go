@@ -28,7 +28,7 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{
-		"This is a Cregh project pulled by the Cregh CLI.",
+		"This is a Creght project pulled by the Creght CLI.",
 		"https://github.com/creght/skills/blob/main/readme.md",
 		"Project ID: project-1",
 		"Site ID: site-1",

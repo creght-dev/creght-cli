@@ -1,8 +1,8 @@
-# Cregh CLI
+# Creght CLI
 
-Cregh CLI is a thin local bridge for syncing site code between a local directory and Cregh.
+Creght CLI is a thin local bridge for syncing site code between a local directory and Creght.
 
-The CLI can also run a local Vite preview for pulled Cregh projects. Cregh remains responsible for cloud rendering, CMS, assets, and the realtime preview environment.
+The CLI can also run a local Vite preview for pulled Creght projects. Creght remains responsible for cloud rendering, CMS, assets, and the realtime preview environment.
 
 ## Install
 
@@ -120,10 +120,10 @@ The command writes remote files such as `/page/...`, `/component/...`, and `creg
 
 ## Local Vite Preview
 
-Cregh projects pulled by the CLI usually do not have their own `package.json`
+Creght projects pulled by the CLI usually do not have their own `package.json`
 or `node_modules`. The local preview plugin therefore uses Vite only for local
 file serving and TSX transpilation; third-party packages continue to resolve
-through the Cregh import map, matching the Web editor preview model. In
+through the Creght import map, matching the Web editor preview model. In
 `creght dev`, the CLI loads the platform import map from server system info and
 passes it to the Vite plugin; the plugin's local map is only a fallback.
 
@@ -167,7 +167,7 @@ module after local file changes without a full page reload.
 
 ## Push Local Changes
 
-Push the current local directory snapshot to Cregh and exit:
+Push the current local directory snapshot to Creght and exit:
 
 ```bash
 creght push --site_id=<project_id>/<site_id> --dir=./mysite
@@ -179,7 +179,7 @@ For local development:
 CREGHT_API_HOST=http://localhost:8433 creght push --site_id=<project_id>/<site_id> --dir=./mysite
 ```
 
-The CLI scans the local directory and calls the existing Cregh `site_action`
+The CLI scans the local directory and calls the existing Creght `site_action`
 API to create or update remote files.
 
 ## Sync Local Changes
@@ -198,12 +198,12 @@ CREGHT_API_HOST=http://localhost:8433 creght sync --site_id=<project_id>/<site_i
 
 `sync` first pushes the current local snapshot, then keeps running and
 automatically listens for local file changes. When a file is changed locally,
-the CLI calls the existing Cregh `site_action` API and updates the remote site
+the CLI calls the existing Creght `site_action` API and updates the remote site
 in realtime. The command also prints the remote preview URL when available.
 
 ## Local Web Editor Bidirectional Sync
 
-Run local files and the online Cregh editor against the same cloud realtime
+Run local files and the online Creght editor against the same cloud realtime
 files:
 
 ```bash
@@ -217,7 +217,7 @@ CREGHT_API_HOST=http://localhost:8433 creght dev --web=http://localhost:5173 --s
 ```
 
 The command prints the online Web editor URL, pushes local file changes to
-Cregh, and listens to the existing WebSocket collaboration channel so editor
+Creght, and listens to the existing WebSocket collaboration channel so editor
 changes are written back to the local directory. MVP conflict handling is last
 write wins.
 
@@ -373,7 +373,7 @@ After creating or changing CMS collections or forms, run `creght pull` again to 
 
 ## Upload Assets
 
-Upload a local file through the Cregh site asset flow:
+Upload a local file through the Creght site asset flow:
 
 ```bash
 creght upload --site_id=<project_id>/<site_id> --file=./image.png
@@ -381,7 +381,7 @@ creght upload --site_id=<project_id>/<site_id> --file=./image.png
 
 The command prints the public file URL by default. Use `--json` to inspect the
 full upload metadata, including `site_path`, a stable `/_assets/...` path that
-can be used from Cregh site code:
+can be used from Creght site code:
 
 ```bash
 creght upload --site_id=<project_id>/<site_id> --file=./image.png --json
@@ -398,7 +398,7 @@ creght upload --site_id=<project_id>/<site_id> --file=./image.png --name=hero.pn
 The current MVP push/sync mode is one-way:
 
 ```text
-local directory -> Cregh remote site
+local directory -> Creght remote site
 ```
 
 `push` fetches the remote file list to build the local path to remote file id
@@ -418,12 +418,12 @@ source of truth.
 
 ## Commands
 
-Cregh CLI is a local bridge for Cregh site code. It can authenticate with
-Cregh, list projects and sites, pull remote site files into a local directory,
-push local files back to Cregh, watch local files for realtime sync, open the
+Creght CLI is a local bridge for Creght site code. It can authenticate with
+Creght, list projects and sites, pull remote site files into a local directory,
+push local files back to Creght, watch local files for realtime sync, open the
 remote preview, and publish a site.
 
-The CLI commands still use the Cregh backend and web app for the canonical
+The CLI commands still use the Creght backend and web app for the canonical
 preview. The Vite plugin is a local development helper and intentionally does
 not implement full production SSR.
 
@@ -449,7 +449,7 @@ creght version
 
 Command meanings:
 
-- `login`: Authenticate this machine with Cregh and save a CLI token.
+- `login`: Authenticate this machine with Creght and save a CLI token.
 - `logout`: Remove the saved CLI token and API host configuration.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download the current remote site files into a local directory.
@@ -461,7 +461,7 @@ Command meanings:
 - `cms`: Manage CMS collections.
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
-- `upload`: Upload a local file as a Cregh site asset and print its URL.
+- `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 
 ## Release

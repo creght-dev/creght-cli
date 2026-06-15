@@ -75,7 +75,7 @@ func clientFromConfig() (*creght.Client, Config, error) {
 
 func runLogin(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
-	webHost := fs.String("web", "", "Cregh web host")
+	webHost := fs.String("web", "", "Creght web host")
 	err := fs.Parse(args)
 	if err != nil {
 		return err
@@ -96,7 +96,7 @@ func runLogin(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Open this URL to authorize Cregh CLI:\n%s\n", session.VerifyURL)
+	fmt.Printf("Open this URL to authorize Creght CLI:\n%s\n", session.VerifyURL)
 	_ = openBrowser(session.VerifyURL)
 
 	deadline := time.Now().Add(time.Duration(session.ExpiresIn) * time.Second)
@@ -259,7 +259,7 @@ func runPull(ctx context.Context, args []string) error {
 	previewURL, _ := previewURL(ctx, client, realSiteID)
 	fmt.Printf("Pulled %d files into %s\n", len(files.List), *dir)
 	if createdAgents {
-		fmt.Printf("Generated AGENTS.md for Cregh agent context\n")
+		fmt.Printf("Generated AGENTS.md for Creght agent context\n")
 	}
 	fmt.Printf("Editor: %s\n", editorURL)
 	if previewURL != "" {

@@ -94,11 +94,11 @@ func ensurePulledAgentsFile(root string, files []creght.File, projectID string, 
 }
 
 func pulledAgentsFileBody(projectID string, siteID string, editorURL string) string {
-	return fmt.Sprintf(`# Cregh Project Agent Notes
+	return fmt.Sprintf(`# Creght Project Agent Notes
 
-This is a Cregh project pulled by the Cregh CLI.
+This is a Creght project pulled by the Creght CLI.
 
-Before editing this project, read the Cregh skill. If the skill is not installed,
+Before editing this project, read the Creght skill. If the skill is not installed,
 install it from this manual:
 
 https://github.com/creght/skills/blob/main/readme.md
@@ -107,7 +107,7 @@ Project ID: %s
 Site ID: %s
 Editor URL: %s
 
-Use the Cregh CLI for ongoing maintenance:
+Use the Creght CLI for ongoing maintenance:
 
 `+"```bash"+`
 creght pull --site_id=%s/%s

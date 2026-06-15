@@ -1,12 +1,12 @@
 import type { Plugin } from 'vite'
 
-export type CreghVitePluginOptions = {
+export type CreghtVitePluginOptions = {
   /**
-   * Local Cregh project root. Defaults to Vite's root.
+   * Local Creght project root. Defaults to Vite's root.
    */
   root?: string
   /**
-   * Cregh API host used by the local /api proxy at runtime.
+   * Creght API host used by the local /api proxy at runtime.
    */
   apiHost?: string
   /**
@@ -24,5 +24,5 @@ export type CreghVitePluginOptions = {
   importMap?: Record<string, string>
 }
 
-export declare function creght(options?: CreghVitePluginOptions): Plugin
+export declare function creght(options?: CreghtVitePluginOptions): Plugin
 export default creght

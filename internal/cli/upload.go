@@ -123,7 +123,7 @@ Options:
 
 The command uploads to the site's asset flow and prints the public file URL by
 default. The JSON output also includes site_path, a stable /_assets/... path that
-can be used from Cregh site code.`)
+can be used from Creght site code.`)
 }
 
 func detectMIMEType(path string, body []byte) string {

@@ -49,9 +49,9 @@ type wsFileUpdateData struct {
 
 func runDev(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("dev", flag.ContinueOnError)
-	webHost := fs.String("web", "", "Cregh web host")
+	webHost := fs.String("web", "", "Creght web host")
 	siteID := fs.String("site_id", "", "project_id/site_id")
-	dir := fs.String("dir", ".", "local Cregh project directory")
+	dir := fs.String("dir", ".", "local Creght project directory")
 	noPreview := fs.Bool("no-preview", false, "do not start a local Vite preview")
 	previewHost := fs.String("preview-host", "localhost", "local Vite preview host")
 	previewPort := fs.Int("preview-port", 5173, "local Vite preview preferred port")

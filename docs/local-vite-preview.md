@@ -1,15 +1,15 @@
-# Cregh Local Vite Preview
+# Creght Local Vite Preview
 
-This document describes how to run a pulled Cregh project locally with Vite.
+This document describes how to run a pulled Creght project locally with Vite.
 
-The local Vite preview is a development helper. It is not the canonical Cregh
+The local Vite preview is a development helper. It is not the canonical Creght
 renderer and does not implement full production SSR. The canonical preview is
-still the remote Cregh preview URL printed by `creght pull`, `creght sync`,
+still the remote Creght preview URL printed by `creght pull`, `creght sync`,
 or `creght preview`.
 
 ## Why Import Map Instead Of Vite Bundling
 
-Cregh site code pulled by the CLI is not a normal Vite app. It usually has:
+Creght site code pulled by the CLI is not a normal Vite app. It usually has:
 
 - `/page/*.tsx` route files
 - `/component/*` reusable components
@@ -22,7 +22,7 @@ Cregh site code pulled by the CLI is not a normal Vite app. It usually has:
 Because of that, Vite should not try to bundle every dependency from local
 `node_modules`. The plugin uses Vite only for local serving and TSX transform.
 Bare imports such as `react`, `framer-motion`, `lucide-react`, `creght/cms`,
-and `creght/form` are resolved by the Cregh import map, which matches the Web
+and `creght/form` are resolved by the Creght import map, which matches the Web
 editor preview model.
 
 ## Install
@@ -94,7 +94,7 @@ the same auth as the CLI.
 npx vite --host 0.0.0.0
 ```
 
-Local file changes are delivered through Vite HMR as a Cregh runtime update.
+Local file changes are delivered through Vite HMR as a Creght runtime update.
 The browser keeps the same page and the runtime re-imports the current page
 module with a fresh timestamp, then re-renders the React root. This avoids a
 full page reload. It is not yet equivalent to React Fast Refresh, so component
@@ -112,7 +112,7 @@ the next available port and prints the real local URL.
 
 ## Routing
 
-The plugin maps Cregh page files to local URLs:
+The plugin maps Creght page files to local URLs:
 
 ```text
 /page/Index.tsx      -> /
@@ -134,12 +134,12 @@ first available page.
 
 The plugin:
 
-- injects the Cregh system import map provided by server system info
+- injects the Creght system import map provided by server system info
 - merges `creght.config.ts` `importMap.imports`
 - injects `customCode.head`, `customCode.bodyStart`, and `customCode.bodyEnd`
 - loads `/index.css` through the Tailwind browser runtime
 - transforms local `.tsx`, `.ts`, `.jsx`, and `.js` files with Vite esbuild
-- rewrites relative imports to local Cregh module URLs
+- rewrites relative imports to local Creght module URLs
 - serves `?raw` and `?url` imports
 - proxies local `/api/*` to `apiHost`
 - calls page `getServerSideProps(context)` in the browser before first render
@@ -164,7 +164,7 @@ This preview intentionally does not implement the full render service:
 - no remote file sync by itself
 
 Use it for fast local visual checks. Use `creght sync` or `creght preview` for
-the canonical remote preview that matches Cregh production behavior.
+the canonical remote preview that matches Creght production behavior.
 
 ## Minimal Workflow
 

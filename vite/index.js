@@ -77,7 +77,7 @@ const contentTypeForPath = (file) => {
 const normalizeProjectPath = (value) => {
   const out = path.posix.normalize('/' + value.replaceAll(path.sep, '/').replace(/^\/+/, ''))
   if (out.startsWith('/../')) {
-    throw new Error(`unsafe Cregh path: ${value}`)
+    throw new Error(`unsafe Creght path: ${value}`)
   }
   return out
 }
@@ -109,7 +109,7 @@ async function resolveFile(projectRoot, projectPath) {
     }
   }
 
-  throw new Error(`Cregh module not found: ${projectPath}`)
+  throw new Error(`Creght module not found: ${projectPath}`)
 }
 
 async function readSiteConfig(projectRoot) {
@@ -338,7 +338,7 @@ async function renderPage() {
   let props = {};
 
   if (!Page) {
-    throw new Error('Cregh page has no default export: ${entryFile}');
+    throw new Error('Creght page has no default export: ${entryFile}');
   }
 
   if (typeof pageModule.getServerSideProps === 'function') {
@@ -367,7 +367,7 @@ hot.on('creght:update', () => {
 async function renderHtml(projectRoot, pathname, options) {
   const routes = await listPages(projectRoot)
   if (routes.length === 0) {
-    return `<!doctype html><div style="font:14px system-ui;padding:24px">No Cregh pages found in <code>/page</code>.</div>`
+    return `<!doctype html><div style="font:14px system-ui;padding:24px">No Creght pages found in <code>/page</code>.</div>`
   }
 
   const matched = matchRoute(routes, pathname)
@@ -380,7 +380,7 @@ async function renderHtml(projectRoot, pathname, options) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(matched.route === '/' ? 'Cregh' : matched.route)}</title>
+  <title>${escapeHtml(matched.route === '/' ? 'Creght' : matched.route)}</title>
   <script type="importmap">${jsonScript({ imports })}</script>
   <script type="module" src="/@vite/client"></script>
   <style type="text/tailwindcss">${indexCss}</style>
@@ -408,7 +408,7 @@ export function creght(options = {}) {
     },
     configureServer(server) {
       const hmrTimers = new Map()
-      const sendCreghUpdate = (file) => {
+      const sendCreghtUpdate = (file) => {
         if (!file.startsWith(projectRoot)) return
 
         const projectPath = normalizeProjectPath(path.relative(projectRoot, file))
@@ -429,9 +429,9 @@ export function creght(options = {}) {
       }
 
       server.watcher.add(path.join(projectRoot, '**/*'))
-      server.watcher.on('change', sendCreghUpdate)
-      server.watcher.on('add', sendCreghUpdate)
-      server.watcher.on('unlink', sendCreghUpdate)
+      server.watcher.on('change', sendCreghtUpdate)
+      server.watcher.on('add', sendCreghtUpdate)
+      server.watcher.on('unlink', sendCreghtUpdate)
 
       server.middlewares.use(async (req, res, next) => {
         try {
