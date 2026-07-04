@@ -87,6 +87,48 @@ func TestRunLogoutDeletesConfig(t *testing.T) {
 	}
 }
 
+func TestRunLogoutRemovesCurrentAPIHostOnly(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CREGHT_API_HOST", "https://creght.com")
+
+	cfgPath, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	err = os.MkdirAll(filepath.Dir(cfgPath), 0o755)
+	if err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	err = os.WriteFile(cfgPath, []byte(`{
+		"api_host": "https://creght.com",
+		"token": "com-token",
+		"tokens": {
+			"https://creght.cn": "cn-token",
+			"https://creght.com": "com-token"
+		}
+	}`), 0o600)
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err = runLogout(nil)
+	if err != nil {
+		t.Fatalf("runLogout: %v", err)
+	}
+
+	cfg, err := loadRawConfig()
+	if err != nil {
+		t.Fatalf("loadRawConfig: %v", err)
+	}
+	if cfg.Tokens["https://creght.cn"] != "cn-token" {
+		t.Fatalf("cn token = %q, want cn-token", cfg.Tokens["https://creght.cn"])
+	}
+	if _, ok := cfg.Tokens["https://creght.com"]; ok {
+		t.Fatalf("com token still exists")
+	}
+}
+
 func TestRunLogoutMissingConfigSucceeds(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

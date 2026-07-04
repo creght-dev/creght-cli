@@ -63,7 +63,7 @@ Current API host: %s`, helpAPIHost()),
 	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Print the installed CLI version.")
 
 	root.AddCommand(loginCommand(ctx, rawArgs))
-	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"logout"}, "logout", "Remove the saved CLI token and API host configuration.", func(ctx context.Context, args []string) error {
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"logout"}, "logout", "Remove the saved CLI login for the current API host.", func(ctx context.Context, args []string) error {
 		return runLogout(args)
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
@@ -128,7 +128,7 @@ func originalArgsAfter(rawArgs []string, path []string) []string {
 }
 
 func loginCommand(ctx context.Context, rawArgs []string) *cobra.Command {
-	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Creght and save a CLI token.", runLogin, func(flags *pflag.FlagSet) {
+	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Creght and save a CLI token for the current API host.", runLogin, func(flags *pflag.FlagSet) {
 		flags.String("web", "", "Creght web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or https://creght.cn.")
 	})
 }

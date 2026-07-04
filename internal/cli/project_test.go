@@ -125,6 +125,111 @@ func TestLoadConfigAllowsEnvAPIHostOverride(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSelectsTokenForCurrentAPIHost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "https://creght.com/")
+
+	cfgPath, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token",
+			"https://creght.com": "com-token"
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.APIHost != "https://creght.com" {
+		t.Fatalf("APIHost = %q, want https://creght.com", cfg.APIHost)
+	}
+	if cfg.Token != "com-token" {
+		t.Fatalf("Token = %q, want com-token", cfg.Token)
+	}
+}
+
+func TestLoadConfigDoesNotReuseLegacyTokenForDifferentAPIHost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "https://creght.com")
+
+	cfgPath, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{"api_host":"https://creght.cn","token":"cn-token"}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.Token != "" {
+		t.Fatalf("Token = %q, want empty", cfg.Token)
+	}
+}
+
+func TestSaveConfigPreservesTokensForOtherAPIHosts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cfgPath, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token"
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err = saveConfig(Config{
+		APIHost: "https://creght.com/",
+		Token:   "com-token",
+	})
+	if err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	bs, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(bs, &cfg); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if cfg.Tokens["https://creght.cn"] != "cn-token" {
+		t.Fatalf("cn token = %q, want cn-token", cfg.Tokens["https://creght.cn"])
+	}
+	if cfg.Tokens["https://creght.com"] != "com-token" {
+		t.Fatalf("com token = %q, want com-token", cfg.Tokens["https://creght.com"])
+	}
+	if cfg.Token != "com-token" {
+		t.Fatalf("Token = %q, want com-token", cfg.Token)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 

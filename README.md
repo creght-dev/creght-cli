@@ -45,20 +45,20 @@ The command opens a browser authorization page. After authorization succeeds, th
 ~/Library/Application Support/creght/config.json
 ```
 
-The config file contains the API host and CLI token.
+The config file contains the current API host and CLI tokens. Tokens are stored per API host, so logging in to `https://creght.cn`, `https://creght.com`, or a local backend does not overwrite the other hosts' login state.
 
 When `--web` is omitted, the CLI uses `CREGHT_WEB_HOST` if set. For local API hosts such as `localhost` or `127.0.0.1`, it defaults to `http://localhost:5173`.
 For production, the default API host and default web host are both `https://creght.cn`.
 
 ## Logout
 
-Remove the saved CLI config:
+Remove the saved CLI login for the current API host:
 
 ```bash
 creght logout
 ```
 
-This clears the saved token and any saved API host. The next command will use the production default unless you set `CREGHT_API_HOST`.
+When `CREGHT_API_HOST` is set, `logout` removes only that host's token. Other saved hosts remain logged in. If the last saved token is removed, the config file is deleted.
 
 ## List Projects
 
@@ -449,8 +449,8 @@ creght version
 
 Command meanings:
 
-- `login`: Authenticate this machine with Creght and save a CLI token.
-- `logout`: Remove the saved CLI token and API host configuration.
+- `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
+- `logout`: Remove the saved CLI login for the current API host.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download the current remote site files into a local directory.
 - `push`: Push the current local directory snapshot to the remote site.
