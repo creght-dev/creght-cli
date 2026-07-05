@@ -220,6 +220,49 @@ type FormLog struct {
 	UpdatedAt string          `json:"updated_at,omitempty"`
 }
 
+type ProjectTable struct {
+	ID         string          `json:"id,omitempty"`
+	ProjectID  string          `json:"project_id,omitempty"`
+	Key        string          `json:"key,omitempty"`
+	UserID     int64           `json:"user_id,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	Desc       string          `json:"desc,omitempty"`
+	JsonSchema json.RawMessage `json:"json_schema,omitempty"`
+	CreatedAt  string          `json:"created_at,omitempty"`
+	UpdatedAt  string          `json:"updated_at,omitempty"`
+}
+
+type ProjectTableRecord struct {
+	ID        string          `json:"id,omitempty"`
+	TableID   string          `json:"table_id,omitempty"`
+	UserID    int64           `json:"user_id,omitempty"`
+	Body      json.RawMessage `json:"body,omitempty"`
+	Sort      int             `json:"sort,omitempty"`
+	CreatedAt string          `json:"created_at,omitempty"`
+	UpdatedAt string          `json:"updated_at,omitempty"`
+}
+
+type ProjectFunc struct {
+	ID        string `json:"id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	Key       string `json:"key,omitempty"`
+	UserID    int64  `json:"user_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Desc      string `json:"desc,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Mimetype  string `json:"mimetype,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type RunFuncResponse struct {
+	OK      bool            `json:"ok"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Logs    json.RawMessage `json:"logs,omitempty"`
+	Error   string          `json:"error,omitempty"`
+	Effects json.RawMessage `json:"effects,omitempty"`
+}
+
 type ListResponse[T any] struct {
 	Total   int64 `json:"total"`
 	HasMore bool  `json:"has_more,omitempty"`
@@ -431,6 +474,150 @@ func (c *Client) DeleteFormLog(ctx context.Context, projectID string, formID str
 func (c *Client) SubmitForm(ctx context.Context, projectID string, formKey string, data map[string]any) error {
 	path := fmt.Sprintf("/api/u/v2/project/%s/form/%s/submit", url.PathEscape(projectID), url.PathEscape(formKey))
 	return c.do(ctx, http.MethodPost, path, nil, data, nil)
+}
+
+func (c *Client) GetProjectTableList(ctx context.Context, projectID string, query url.Values) (ListResponse[ProjectTable], error) {
+	var ret ListResponse[ProjectTable]
+	path := fmt.Sprintf("/api/u/project/%s/table_list", url.PathEscape(projectID))
+	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
+	if err != nil {
+		return ListResponse[ProjectTable]{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetProjectTable(ctx context.Context, projectID string, tableID string) (ProjectTable, error) {
+	var ret ProjectTable
+	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
+	if err != nil {
+		return ProjectTable{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) CreateProjectTable(ctx context.Context, projectID string, table ProjectTable) (string, error) {
+	var ret IDResponse
+	path := fmt.Sprintf("/api/u/project/%s/table", url.PathEscape(projectID))
+	err := c.do(ctx, http.MethodPost, path, nil, table, &ret)
+	if err != nil {
+		return "", err
+	}
+
+	return ret.ID, nil
+}
+
+func (c *Client) UpdateProjectTable(ctx context.Context, projectID string, tableID string, table ProjectTable) error {
+	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	return c.do(ctx, http.MethodPut, path, nil, table, nil)
+}
+
+func (c *Client) DeleteProjectTable(ctx context.Context, projectID string, tableID string) error {
+	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
+}
+
+func (c *Client) GetProjectTableRecordList(ctx context.Context, projectID string, tableID string, query url.Values, body any) (ListResponse[ProjectTableRecord], error) {
+	var ret ListResponse[ProjectTableRecord]
+	path := fmt.Sprintf("/api/u/project/%s/table/%s/record_list", url.PathEscape(projectID), url.PathEscape(tableID))
+	method := http.MethodGet
+	if body != nil {
+		method = http.MethodPost
+	}
+	err := c.do(ctx, method, path, query, body, &ret)
+	if err != nil {
+		return ListResponse[ProjectTableRecord]{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetProjectTableRecord(ctx context.Context, projectID string, tableID string, recordID string) (ProjectTableRecord, error) {
+	var ret ProjectTableRecord
+	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	err := c.do(ctx, http.MethodGet, path, url.Values{"id": []string{recordID}}, nil, &ret)
+	if err != nil {
+		return ProjectTableRecord{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) CreateProjectTableRecord(ctx context.Context, projectID string, tableID string, record ProjectTableRecord) (string, error) {
+	var ret IDResponse
+	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	err := c.do(ctx, http.MethodPost, path, nil, record, &ret)
+	if err != nil {
+		return "", err
+	}
+
+	return ret.ID, nil
+}
+
+func (c *Client) UpdateProjectTableRecord(ctx context.Context, projectID string, tableID string, record ProjectTableRecord) error {
+	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	return c.do(ctx, http.MethodPut, path, nil, record, nil)
+}
+
+func (c *Client) DeleteProjectTableRecord(ctx context.Context, projectID string, tableID string, recordID string) error {
+	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	return c.do(ctx, http.MethodDelete, path, nil, map[string]string{"id": recordID}, nil)
+}
+
+func (c *Client) GetProjectFuncList(ctx context.Context, projectID string, query url.Values) (ListResponse[ProjectFunc], error) {
+	var ret ListResponse[ProjectFunc]
+	path := fmt.Sprintf("/api/u/project/%s/func_list", url.PathEscape(projectID))
+	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
+	if err != nil {
+		return ListResponse[ProjectFunc]{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetProjectFunc(ctx context.Context, projectID string, funcID string) (ProjectFunc, error) {
+	var ret ProjectFunc
+	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
+	if err != nil {
+		return ProjectFunc{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) CreateProjectFunc(ctx context.Context, projectID string, fn ProjectFunc) (string, error) {
+	var ret IDResponse
+	path := fmt.Sprintf("/api/u/project/%s/func", url.PathEscape(projectID))
+	err := c.do(ctx, http.MethodPost, path, nil, fn, &ret)
+	if err != nil {
+		return "", err
+	}
+
+	return ret.ID, nil
+}
+
+func (c *Client) UpdateProjectFunc(ctx context.Context, projectID string, funcID string, fn ProjectFunc) error {
+	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	return c.do(ctx, http.MethodPut, path, nil, fn, nil)
+}
+
+func (c *Client) DeleteProjectFunc(ctx context.Context, projectID string, funcID string) error {
+	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
+}
+
+func (c *Client) RunProjectFunc(ctx context.Context, projectID string, body map[string]any) (RunFuncResponse, error) {
+	var ret RunFuncResponse
+	path := fmt.Sprintf("/api/u/project/%s/func/run", url.PathEscape(projectID))
+	err := c.do(ctx, http.MethodPost, path, nil, body, &ret)
+	if err != nil {
+		return RunFuncResponse{}, err
+	}
+
+	return ret, nil
 }
 
 func (c *Client) PreUploadSiteAsset(ctx context.Context, projectID string, siteID string, req AssetPreUploadRequest) (AssetPreUploadResponse, error) {

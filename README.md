@@ -371,6 +371,67 @@ creght form submit --site_id=<project_id>/<site_id> --key=contact-form --data=./
 
 After creating or changing CMS collections or forms, run `creght pull` again to refresh generated files such as `/types/cms.d.ts` and `/types/form.d.ts` before writing code that imports those types.
 
+## Manage Backend Tables
+
+Project JSON tables provide persistent data for Creght/Talizen Func code through
+`ctx.db.*`.
+
+```bash
+creght table list --site_id=<project_id>/<site_id>
+creght table create --site_id=<project_id>/<site_id> --key=appointments --name="Appointments" --schema=./appointments.schema.json
+creght table get --site_id=<project_id>/<site_id> --key=appointments
+creght table update --site_id=<project_id>/<site_id> --key=appointments --schema=./appointments.schema.json
+creght table delete --site_id=<project_id>/<site_id> --key=appointments
+```
+
+Manage seed or operational records:
+
+```bash
+creght table record list --site_id=<project_id>/<site_id> --table=appointments
+creght table record list --site_id=<project_id>/<site_id> --table=appointments --where=./where.json
+creght table record create --site_id=<project_id>/<site_id> --table=appointments --data=./record.json
+creght table record update --site_id=<project_id>/<site_id> --table=appointments --id=<record_id> --data=./patch.json
+creght table record delete --site_id=<project_id>/<site_id> --table=appointments --id=<record_id>
+```
+
+`record update` sends a patch body to the backend. Existing fields are merged,
+and a `null` field value removes that field.
+
+## Manage Func Backend Code
+
+Func is for small project-level backend workflows such as bookings, RSVP,
+availability checks, protected status updates, and JSON-table reads/writes.
+Func keys are extensionless project paths like `booking` or
+`profile/settings`.
+
+```bash
+creght func list --site_id=<project_id>/<site_id>
+creght func create --site_id=<project_id>/<site_id> --key=booking --file=./booking.ts
+creght func get --site_id=<project_id>/<site_id> --key=booking
+creght func update --site_id=<project_id>/<site_id> --key=booking --file=./booking.ts
+creght func run --site_id=<project_id>/<site_id> --key=booking.create --input=./input.json
+creght func delete --site_id=<project_id>/<site_id> --key=booking
+```
+
+Func files should use ESM exports and the `(input, ctx)` signature:
+
+```ts
+export function create(input, ctx) {
+  return ctx.db.insert("appointments", input)
+}
+```
+
+Page and component code should call Func through the `talizen/func` SDK:
+
+```ts
+import { invoke } from "talizen/func"
+
+await invoke("booking.create", input)
+```
+
+Use `talizen/auth` for login, registration, logout, current-user state, and
+OAuth. Do not implement passwords, sessions, or OAuth callbacks in Func.
+
 ## Upload Assets
 
 Upload a local file through the Creght site asset flow:
@@ -443,6 +504,10 @@ creght content list --site_id=<project_id>/<site_id> --collection=<key>
 creght content create --site_id=<project_id>/<site_id> --collection=<key> --data=./content.json
 creght form list --site_id=<project_id>/<site_id>
 creght form create --site_id=<project_id>/<site_id> --key=<key> --name=<name> --schema=./schema.json
+creght table list --site_id=<project_id>/<site_id>
+creght table record create --site_id=<project_id>/<site_id> --table=<key> --data=./record.json
+creght func create --site_id=<project_id>/<site_id> --key=<key> --file=./func.ts
+creght func run --site_id=<project_id>/<site_id> --key=<key.method> --input=./input.json
 creght upload --site_id=<project_id>/<site_id> --file=./image.png
 creght version
 ```
@@ -461,6 +526,8 @@ Command meanings:
 - `cms`: Manage CMS collections.
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
+- `table`: Manage project JSON tables and records used by Func.
+- `func`: Manage and run project Func backend code.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 

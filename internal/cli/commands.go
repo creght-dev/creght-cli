@@ -76,6 +76,8 @@ Current API host: %s`, helpAPIHost()),
 	root.AddCommand(cmsCommand(ctx, rawArgs))
 	root.AddCommand(contentCommand(ctx, rawArgs))
 	root.AddCommand(formCommand(ctx, rawArgs))
+	root.AddCommand(tableCommand(ctx, rawArgs))
+	root.AddCommand(funcCommand(ctx, rawArgs))
 	root.AddCommand(uploadCommand(ctx, rawArgs))
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
@@ -258,6 +260,52 @@ func formCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return cmd
 }
 
+func tableCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "table",
+		Short: "Manage project JSON tables and records for Func.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTable(ctx, originalArgsAfter(rawArgs, []string{"table"}))
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "list", "List project JSON tables.", runTable, addListFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "get", "Get a project JSON table.", runTable, addGetFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "create", "Create a project JSON table.", runTable, addSchemaCreateFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "update", "Update a project JSON table.", runTable, addSchemaUpdateFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "delete", "Delete a project JSON table.", runTable, addGetFlags))
+	recordCmd := &cobra.Command{
+		Use:   "record",
+		Short: "Manage project JSON table records.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTable(ctx, originalArgsAfter(rawArgs, []string{"table"}))
+		},
+	}
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "list", "List table records.", runTable, addTableRecordListFlags))
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "get", "Get a table record.", runTable, addTableRecordGetFlags))
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "create", "Create a table record.", runTable, addTableRecordCreateFlags))
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "update", "Update a table record.", runTable, addTableRecordUpdateFlags))
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "delete", "Delete a table record.", runTable, addTableRecordGetFlags))
+	cmd.AddCommand(recordCmd)
+	return cmd
+}
+
+func funcCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "func",
+		Short: "Manage and run project Func backend code.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFunc(ctx, originalArgsAfter(rawArgs, []string{"func"}))
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "list", "List project Func files.", runFunc, addListFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "get", "Get a project Func.", runFunc, addGetFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "create", "Create a project Func.", runFunc, addFuncCreateFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "update", "Update a project Func.", runFunc, addFuncUpdateFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "delete", "Delete a project Func.", runFunc, addGetFlags))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "run", "Run a project Func with sample input.", runFunc, addFuncRunFlags))
+	return cmd
+}
+
 func addSiteIDFlag(flags *pflag.FlagSet) {
 	flags.String("site_id", "", "Site reference in <project_id>/<site_id> format.")
 }
@@ -361,4 +409,58 @@ func addFormSubmitFlags(flags *pflag.FlagSet) {
 	flags.String("uid", "", "Submitter uid.")
 	flags.String("ua", "", "Submitter user agent.")
 	flags.String("ip", "", "Submitter IP.")
+}
+
+func addTableRecordBaseFlags(flags *pflag.FlagSet) {
+	addSiteIDFlag(flags)
+	flags.String("table", "", "Table key or id.")
+}
+
+func addTableRecordListFlags(flags *pflag.FlagSet) {
+	addTableRecordBaseFlags(flags)
+	flags.Int("limit", 20, "Result limit.")
+	flags.Int("offset", 0, "Result offset.")
+	flags.String("order_by", "", "Order by.")
+	flags.String("where", "", "Simple equality filter JSON file.")
+	flags.String("filter", "", "Structured filter JSON file.")
+}
+
+func addTableRecordGetFlags(flags *pflag.FlagSet) {
+	addTableRecordBaseFlags(flags)
+	flags.String("id", "", "Record id.")
+}
+
+func addTableRecordCreateFlags(flags *pflag.FlagSet) {
+	addTableRecordBaseFlags(flags)
+	flags.String("data", "", "Record JSON file.")
+	flags.Int("sort", 0, "Record sort.")
+}
+
+func addTableRecordUpdateFlags(flags *pflag.FlagSet) {
+	addTableRecordCreateFlags(flags)
+	flags.String("id", "", "Record id.")
+}
+
+func addFuncCreateFlags(flags *pflag.FlagSet) {
+	addSiteIDFlag(flags)
+	flags.String("key", "", "Func key.")
+	flags.String("name", "", "Func name.")
+	flags.String("desc", "", "Func description.")
+	flags.String("file", "", "TypeScript Func file.")
+	flags.String("body", "", "Inline Func body.")
+	flags.String("mimetype", "application/javascript", "Func MIME type.")
+}
+
+func addFuncUpdateFlags(flags *pflag.FlagSet) {
+	addFuncCreateFlags(flags)
+	flags.String("id", "", "Func id.")
+	flags.String("new-key", "", "New Func key.")
+}
+
+func addFuncRunFlags(flags *pflag.FlagSet) {
+	addSiteIDFlag(flags)
+	flags.String("key", "", "Func key or key.method.")
+	flags.String("method", "", "Method name.")
+	flags.String("input", "", "Input JSON file.")
+	flags.Int("timeout_ms", 0, "Timeout in milliseconds.")
 }
