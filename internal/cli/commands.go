@@ -293,16 +293,11 @@ func tableCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 func funcCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "func",
-		Short: "Manage and run project Func backend code.",
+		Short: "Run project Func backend code with sample input.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFunc(ctx, originalArgsAfter(rawArgs, []string{"func"}))
 		},
 	}
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "list", "List project Func files.", runFunc, addListFlags))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "get", "Get a project Func.", runFunc, addGetFlags))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "create", "Create a project Func.", runFunc, addFuncCreateFlags))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "update", "Update a project Func.", runFunc, addFuncUpdateFlags))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "delete", "Delete a project Func.", runFunc, addGetFlags))
 	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"func"}, "run", "Run a project Func with sample input.", runFunc, addFuncRunFlags))
 	return cmd
 }
@@ -442,22 +437,6 @@ func addTableRecordCreateFlags(flags *pflag.FlagSet) {
 func addTableRecordUpdateFlags(flags *pflag.FlagSet) {
 	addTableRecordCreateFlags(flags)
 	flags.String("id", "", "Record id.")
-}
-
-func addFuncCreateFlags(flags *pflag.FlagSet) {
-	addSiteIDFlag(flags)
-	flags.String("key", "", "Func key.")
-	flags.String("name", "", "Func name.")
-	flags.String("desc", "", "Func description.")
-	flags.String("file", "", "TypeScript Func file.")
-	flags.String("body", "", "Inline Func body.")
-	flags.String("mimetype", "application/javascript", "Func MIME type.")
-}
-
-func addFuncUpdateFlags(flags *pflag.FlagSet) {
-	addFuncCreateFlags(flags)
-	flags.String("id", "", "Func id.")
-	flags.String("new-key", "", "New Func key.")
 }
 
 func addFuncRunFlags(flags *pflag.FlagSet) {

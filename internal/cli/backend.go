@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -453,16 +452,6 @@ func runFunc(ctx context.Context, args []string) error {
 	}
 
 	switch args[0] {
-	case "list":
-		return runFuncList(ctx, args[1:])
-	case "get":
-		return runFuncGet(ctx, args[1:])
-	case "create":
-		return runFuncCreate(ctx, args[1:])
-	case "update":
-		return runFuncUpdate(ctx, args[1:])
-	case "delete":
-		return runFuncDelete(ctx, args[1:])
 	case "run":
 		return runFuncRun(ctx, args[1:])
 	case "help", "-h", "--help":
@@ -477,194 +466,14 @@ func printFuncUsage() {
 	fmt.Println(`creght func
 
 Usage:
-  creght func list --site_id=<project_id>/<site_id>
-  creght func get --site_id=<project_id>/<site_id> --key=<key>
-  creght func create --site_id=<project_id>/<site_id> --key=<key> --file=./func.ts [--name=<name>] [--desc=<desc>]
-  creght func update --site_id=<project_id>/<site_id> --key=<key> [--new-key=<key>] [--file=./func.ts] [--name=<name>] [--desc=<desc>]
-  creght func delete --site_id=<project_id>/<site_id> --key=<key>
   creght func run --site_id=<project_id>/<site_id> --key=<key-or-key.method> [--method=<method>] [--input=./input.json] [--timeout_ms=3000]
 
 Notes:
+  Create, update, rename, and delete Func code through backend/func files and
+  creght pull/push/sync/dev. This command is only for running sample input.
   Func keys are extensionless project paths such as booking or profile/settings.
   Write ESM exports with (input, ctx): export function create(input, ctx) { ... }.
   Use talizen/func in page code to call invoke("booking.create", input).`)
-}
-
-func runFuncList(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("func list", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	limit := fs.Int("limit", 100, "result limit")
-	offset := fs.Int("offset", 0, "result offset")
-	searchKey := fs.String("search_key", "", "search key")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	projectID, _, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-	query := paginationQuery(*limit, *offset)
-	setQuery(query, "search_key", *searchKey)
-	res, err := client.GetProjectFuncList(ctx, projectID, query)
-	if err != nil {
-		return err
-	}
-
-	return printJSON(res)
-}
-
-func runFuncGet(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("func get", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	id := fs.String("id", "", "func id")
-	key := fs.String("key", "", "func key")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	projectID, _, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-	funcID, err := resolveFuncID(ctx, client, projectID, *id, *key)
-	if err != nil {
-		return err
-	}
-	fn, err := client.GetProjectFunc(ctx, projectID, funcID)
-	if err != nil {
-		return err
-	}
-
-	return printJSON(fn)
-}
-
-func runFuncCreate(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("func create", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	key := fs.String("key", "", "func key")
-	name := fs.String("name", "", "func name")
-	desc := fs.String("desc", "", "func description")
-	filePath := fs.String("file", "", "TypeScript func file")
-	body := fs.String("body", "", "inline func body")
-	mimetype := fs.String("mimetype", "application/javascript", "func MIME type")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*key) == "" {
-		return fmt.Errorf("--key is required")
-	}
-	code, err := readFuncBodyRequired(*filePath, *body)
-	if err != nil {
-		return err
-	}
-
-	projectID, _, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-	id, err := client.CreateProjectFunc(ctx, projectID, creght.ProjectFunc{
-		Key:      strings.TrimSpace(*key),
-		Name:     strings.TrimSpace(*name),
-		Desc:     strings.TrimSpace(*desc),
-		Body:     code,
-		Mimetype: strings.TrimSpace(*mimetype),
-	})
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(id)
-	return nil
-}
-
-func runFuncUpdate(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("func update", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	id := fs.String("id", "", "func id")
-	key := fs.String("key", "", "existing func key")
-	newKey := fs.String("new-key", "", "new func key")
-	name := fs.String("name", "", "func name")
-	desc := fs.String("desc", "", "func description")
-	filePath := fs.String("file", "", "TypeScript func file")
-	body := fs.String("body", "", "inline func body")
-	mimetype := fs.String("mimetype", "", "func MIME type")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	code, err := readFuncBodyOptional(*filePath, *body)
-	if err != nil {
-		return err
-	}
-	projectID, _, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-	funcID, err := resolveFuncID(ctx, client, projectID, *id, *key)
-	if err != nil {
-		return err
-	}
-	fn := creght.ProjectFunc{
-		Name:     strings.TrimSpace(*name),
-		Desc:     strings.TrimSpace(*desc),
-		Body:     code,
-		Mimetype: strings.TrimSpace(*mimetype),
-	}
-	if strings.TrimSpace(*newKey) != "" {
-		fn.Key = strings.TrimSpace(*newKey)
-	}
-	if err := client.UpdateProjectFunc(ctx, projectID, funcID, fn); err != nil {
-		return err
-	}
-
-	fmt.Println("ok")
-	return nil
-}
-
-func runFuncDelete(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("func delete", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	id := fs.String("id", "", "func id")
-	key := fs.String("key", "", "func key")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	projectID, _, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-	funcID, err := resolveFuncID(ctx, client, projectID, *id, *key)
-	if err != nil {
-		return err
-	}
-	if err := client.DeleteProjectFunc(ctx, projectID, funcID); err != nil {
-		return err
-	}
-
-	fmt.Println("ok")
-	return nil
 }
 
 func runFuncRun(ctx context.Context, args []string) error {
@@ -769,33 +578,6 @@ func resolveTableID(ctx context.Context, client *creght.Client, projectID string
 	return "", fmt.Errorf("table key or id %q not found", keyOrID)
 }
 
-func resolveFuncID(ctx context.Context, client *creght.Client, projectID string, id string, key string) (string, error) {
-	if strings.TrimSpace(id) != "" {
-		return strings.TrimSpace(id), nil
-	}
-	if strings.TrimSpace(key) == "" {
-		return "", fmt.Errorf("one of --id or --key is required")
-	}
-	funcs, err := client.GetProjectFuncList(ctx, projectID, url.Values{"limit": []string{"-1"}})
-	if err != nil {
-		return "", err
-	}
-	key = strings.TrimSpace(key)
-	for _, fn := range funcs.List {
-		if fn.ID == key || funcKeyMatches(fn.Key, key) {
-			return fn.ID, nil
-		}
-	}
-
-	return "", fmt.Errorf("func key %q not found", key)
-}
-
-func funcKeyMatches(stored string, input string) bool {
-	stored = strings.Trim(strings.TrimSpace(stored), "/")
-	input = strings.Trim(strings.TrimSpace(input), "/")
-	return stored == input
-}
-
 func readJSONRawRequired(path string) (json.RawMessage, error) {
 	raw, err := readOptionalJSON(path)
 	if err != nil {
@@ -805,35 +587,6 @@ func readJSONRawRequired(path string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("JSON file path is required")
 	}
 	return raw, nil
-}
-
-func readFuncBodyRequired(filePath string, inline string) (string, error) {
-	body, err := readFuncBodyOptional(filePath, inline)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(body) == "" {
-		return "", fmt.Errorf("one of --file or --body is required")
-	}
-	return body, nil
-}
-
-func readFuncBodyOptional(filePath string, inline string) (string, error) {
-	if strings.TrimSpace(filePath) != "" {
-		bs, err := os.ReadFile(filePath)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", filePath, err)
-		}
-		body := string(bs)
-		if strings.TrimSpace(body) == "" {
-			return "", fmt.Errorf("func file is empty")
-		}
-		return body, nil
-	}
-	if strings.TrimSpace(inline) != "" {
-		return inline, nil
-	}
-	return "", nil
 }
 
 func normalizeTableRecordFilter(filter map[string]any) map[string]any {

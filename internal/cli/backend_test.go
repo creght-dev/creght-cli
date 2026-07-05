@@ -116,6 +116,34 @@ func TestRunFuncRunSendsInvokePayload(t *testing.T) {
 	}
 }
 
+func TestRunFuncManagementCommandsAreRemoved(t *testing.T) {
+	err := runFunc(context.Background(), []string{"create", "--site_id=project-1/site-1", "--key=booking"})
+	if err == nil || !strings.Contains(err.Error(), "unknown func command: create") {
+		t.Fatalf("runFunc create err = %v, want unknown command", err)
+	}
+
+	output := captureStdout(t, func() {
+		err = runFunc(context.Background(), []string{"help"})
+	})
+	if err != nil {
+		t.Fatalf("runFunc help: %v", err)
+	}
+	if !strings.Contains(output, "creght func run") {
+		t.Fatalf("help output missing func run: %q", output)
+	}
+	for _, removed := range []string{
+		"creght func list",
+		"creght func get",
+		"creght func create",
+		"creght func update",
+		"creght func delete",
+	} {
+		if strings.Contains(output, removed) {
+			t.Fatalf("help output contains removed command %q: %q", removed, output)
+		}
+	}
+}
+
 func TestNormalizeTableRecordFilterAcceptsToolFieldNames(t *testing.T) {
 	filter := normalizeTableRecordFilter(map[string]any{
 		"match": "and",

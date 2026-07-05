@@ -205,8 +205,8 @@ The CLI scans the local workspace and diffs both frontend files and Func files:
 - `backend/func/**/*.ts` is synced to project Func records.
 
 Creating, editing, renaming, or deleting files under `backend/func/` creates,
-updates, renames, or deletes Func records through the backend API. Agents should
-usually edit files and run `creght push` instead of manually calling Func CRUD
+updates, renames, or deletes Func records through the backend API. Func CRUD is
+intentionally file-based; the CLI does not expose manual Func management
 commands.
 
 ## Sync Local Changes
@@ -473,8 +473,8 @@ Use `creght func run` to self-test a Func method with sample input:
 creght func run --site_id=<project_id>/<site_id> --key=booking.create --input=./input.json
 ```
 
-The lower-level `creght func list/get/create/update/delete` commands remain
-available for debugging and scripts, but agents should prefer the file workflow.
+The CLI intentionally does not expose `creght func list/get/create/update/delete`.
+Use `backend/func` files for Func CRUD, and `creght func run` only for self-tests.
 
 ## Upload Assets
 
@@ -570,7 +570,7 @@ Command meanings:
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
 - `table`: Manage project JSON tables and records used by Func.
-- `func`: Run or manually manage project Func backend code; prefer `backend/func` file sync for normal edits.
+- `func`: Run project Func backend code with sample input. Func CRUD is handled through `backend/func` file sync.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 
