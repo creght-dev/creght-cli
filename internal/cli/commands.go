@@ -48,8 +48,9 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Long: fmt.Sprintf(`Creght CLI authenticates with Creght, lists projects and sites,
-pulls remote site files into a local directory, pushes local changes back to
-Creght, watches local files for sync, opens previews, and publishes sites.
+pulls remote frontend and Func files into a local workspace, pushes local
+changes back to Creght, watches local files for sync, opens previews, and
+publishes sites.
 
 Current API host: %s`, helpAPIHost()),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,9 +68,9 @@ Current API host: %s`, helpAPIHost()),
 		return runLogout(args)
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download the current remote site files into a local directory.", runPull))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Push the current local directory snapshot to the remote site.", runPush))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local files and sync changes back to Creght.", runSync))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download frontend and Func files into a local workspace.", runPull))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Push the current local workspace snapshot to Creght.", runPush))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local frontend and Func files and sync changes back to Creght.", runSync))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
@@ -360,6 +361,7 @@ func addContentGetFlags(flags *pflag.FlagSet) {
 	addContentBaseFlags(flags)
 	flags.String("id", "", "Content id.")
 	flags.String("slug", "", "Content slug.")
+	flags.String("out", "", "Write JSON output to file instead of stdout.")
 }
 
 func addContentCreateFlags(flags *pflag.FlagSet) {
@@ -428,6 +430,7 @@ func addTableRecordListFlags(flags *pflag.FlagSet) {
 func addTableRecordGetFlags(flags *pflag.FlagSet) {
 	addTableRecordBaseFlags(flags)
 	flags.String("id", "", "Record id.")
+	flags.String("out", "", "Write JSON output to file instead of stdout.")
 }
 
 func addTableRecordCreateFlags(flags *pflag.FlagSet) {

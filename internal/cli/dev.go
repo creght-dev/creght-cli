@@ -99,7 +99,7 @@ func runDev(ctx context.Context, args []string) error {
 
 	if !*noPreview {
 		preview, err := startVitePreview(ctx, vitePreviewOptions{
-			Dir:       dev.dir,
+			Dir:       siteSyncRoot(dev.dir),
 			APIHost:   dev.apiHost,
 			ProjectID: projectID,
 			Token:     dev.token,
@@ -623,11 +623,29 @@ func (d *DevSyncer) mirrorRemoteToLocal(ctx context.Context) error {
 		}
 	}
 
-	return filepath.WalkDir(d.dir, func(path string, entry os.DirEntry, err error) error {
+	funcs, err := d.client.GetProjectFuncList(ctx, d.projectID, url.Values{"limit": []string{"-1"}})
+	if err != nil {
+		return err
+	}
+	for i, fn := range funcs.List {
+		if strings.TrimSpace(fn.Body) == "" && strings.TrimSpace(fn.ID) != "" {
+			detail, err := d.client.GetProjectFunc(ctx, d.projectID, fn.ID)
+			if err != nil {
+				return err
+			}
+			funcs.List[i] = detail
+		}
+	}
+	if err := writeProjectFuncsToWorkspace(d.dir, funcs.List); err != nil {
+		return err
+	}
+
+	siteRoot := siteSyncRoot(d.dir)
+	return filepath.WalkDir(siteRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if shouldSkipLocalPath(d.dir, path) {
+		if shouldSkipLocalPath(siteRoot, path) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -636,7 +654,7 @@ func (d *DevSyncer) mirrorRemoteToLocal(ctx context.Context) error {
 		if entry.IsDir() {
 			return nil
 		}
-		remotePath, err := localPathToRemote(d.dir, path)
+		remotePath, err := localPathToRemote(siteRoot, path)
 		if err != nil {
 			return err
 		}
@@ -652,7 +670,7 @@ func (d *DevSyncer) mirrorRemoteToLocal(ctx context.Context) error {
 }
 
 func (d *DevSyncer) writeRemoteFileToLocal(remotePath string, body string) error {
-	localPath, err := remotePathToLocal(d.dir, remotePath)
+	localPath, err := remotePathToWorkspaceLocal(d.dir, remotePath)
 	if err != nil {
 		return err
 	}

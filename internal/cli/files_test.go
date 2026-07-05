@@ -41,6 +41,48 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 	}
 }
 
+func TestWorkspacePathMapping(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	localPath, err := remotePathToWorkspaceLocal(dir, "/page/Index.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localPath != filepath.Join(dir, "frontend", "page", "Index.tsx") {
+		t.Fatalf("localPath = %q", localPath)
+	}
+
+	remotePath, err := localWorkspacePathToRemote(dir, localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remotePath != "/page/Index.tsx" {
+		t.Fatalf("remotePath = %q", remotePath)
+	}
+}
+
+func TestFuncPathMapping(t *testing.T) {
+	dir := t.TempDir()
+	localPath, err := funcKeyToLocalPath(dir, "/profile/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localPath != filepath.Join(dir, "backend", "func", "profile", "settings.ts") {
+		t.Fatalf("localPath = %q", localPath)
+	}
+
+	key, err := localPathToFuncKey(dir, localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "/profile/settings" {
+		t.Fatalf("key = %q", key)
+	}
+}
+
 func TestEnsurePulledAgentsFileDoesNothingWhenRemoteExists(t *testing.T) {
 	dir := t.TempDir()
 

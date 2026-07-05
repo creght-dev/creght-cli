@@ -113,7 +113,7 @@ func TestStageVitePluginCopiesRelativeImports(t *testing.T) {
 
 func TestWriteRemoteFileToLocalSkipsSameContent(t *testing.T) {
 	dir := t.TempDir()
-	localPath := filepath.Join(dir, "page", "About.tsx")
+	localPath := filepath.Join(dir, "frontend", "page", "About.tsx")
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		t.Fatalf("mkdir page: %v", err)
 	}

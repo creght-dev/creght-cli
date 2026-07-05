@@ -102,9 +102,9 @@ creght project create --name="My Project" --from_id=<project_id>
 creght project create --name="My Project" --tpl_id=<template_id>
 ```
 
-## Pull Site Code
+## Pull Site Workspace
 
-Download the current remote site files into a local directory:
+Download the current remote site workspace into a local directory:
 
 ```bash
 creght pull --site_id=<project_id>/<site_id> --dir=./mysite
@@ -116,7 +116,26 @@ For local development:
 CREGHT_API_HOST=http://localhost:8433 creght pull --site_id=<project_id>/<site_id> --dir=./mysite
 ```
 
-The command writes remote files such as `/page/...`, `/component/...`, and `creght.config.ts` into the target directory.
+The command writes a file-based workspace:
+
+```text
+mysite/
+  AGENTS.md
+  frontend/
+    page/...
+    component/...
+    talizen.config.ts
+  backend/
+    func/
+      booking.ts
+      profile/settings.ts
+```
+
+Remote frontend files such as `/page/...`, `/component/...`, and
+`talizen.config.ts` are written under `frontend/`. Project Func code is written
+under `backend/func/`; for example Func key `booking` maps to
+`backend/func/booking.ts`, and `profile/settings` maps to
+`backend/func/profile/settings.ts`.
 
 ## Local Vite Preview
 
@@ -124,8 +143,9 @@ Creght projects pulled by the CLI usually do not have their own `package.json`
 or `node_modules`. The local preview plugin therefore uses Vite only for local
 file serving and TSX transpilation; third-party packages continue to resolve
 through the Creght import map, matching the Web editor preview model. In
-`creght dev`, the CLI loads the platform import map from server system info and
-passes it to the Vite plugin; the plugin's local map is only a fallback.
+`creght dev`, the CLI serves the `frontend/` directory when present, loads the
+platform import map from server system info, and passes it to the Vite plugin;
+the plugin's local map is only a fallback.
 
 Install Vite in the local project folder:
 
@@ -179,8 +199,15 @@ For local development:
 CREGHT_API_HOST=http://localhost:8433 creght push --site_id=<project_id>/<site_id> --dir=./mysite
 ```
 
-The CLI scans the local directory and calls the existing Creght `site_action`
-API to create or update remote files.
+The CLI scans the local workspace and diffs both frontend files and Func files:
+
+- `frontend/**` is synced to Creght site files.
+- `backend/func/**/*.ts` is synced to project Func records.
+
+Creating, editing, renaming, or deleting files under `backend/func/` creates,
+updates, renames, or deletes Func records through the backend API. Agents should
+usually edit files and run `creght push` instead of manually calling Func CRUD
+commands.
 
 ## Sync Local Changes
 
@@ -197,9 +224,9 @@ CREGHT_API_HOST=http://localhost:8433 creght sync --site_id=<project_id>/<site_i
 ```
 
 `sync` first pushes the current local snapshot, then keeps running and
-automatically listens for local file changes. When a file is changed locally,
-the CLI calls the existing Creght `site_action` API and updates the remote site
-in realtime. The command also prints the remote preview URL when available.
+automatically listens for local file changes. When a frontend or Func file is
+changed locally, the CLI updates the corresponding remote resource in realtime.
+The command also prints the remote preview URL when available.
 
 ## Local Web Editor Bidirectional Sync
 
@@ -317,6 +344,7 @@ List, get, create, update, and delete content entries:
 ```bash
 creght content list --site_id=<project_id>/<site_id> --collection=blogs
 creght content get --site_id=<project_id>/<site_id> --collection=blogs --slug=hello-world
+creght content get --site_id=<project_id>/<site_id> --collection=blogs --slug=hello-world --out=./content.json
 creght content create --site_id=<project_id>/<site_id> --collection=blogs --data=./content.json --slug=hello-world
 creght content update --site_id=<project_id>/<site_id> --collection=blogs --id=<content_id> --data=./content.json
 creght content delete --site_id=<project_id>/<site_id> --collection=blogs --id=<content_id>
@@ -389,6 +417,7 @@ Manage seed or operational records:
 ```bash
 creght table record list --site_id=<project_id>/<site_id> --table=appointments
 creght table record list --site_id=<project_id>/<site_id> --table=appointments --where=./where.json
+creght table record get --site_id=<project_id>/<site_id> --table=appointments --id=<record_id> --out=./record.json
 creght table record create --site_id=<project_id>/<site_id> --table=appointments --data=./record.json
 creght table record update --site_id=<project_id>/<site_id> --table=appointments --id=<record_id> --data=./patch.json
 creght table record delete --site_id=<project_id>/<site_id> --table=appointments --id=<record_id>
@@ -397,21 +426,27 @@ creght table record delete --site_id=<project_id>/<site_id> --table=appointments
 `record update` sends a patch body to the backend. Existing fields are merged,
 and a `null` field value removes that field.
 
-## Manage Func Backend Code
+## Func Backend Code As Files
 
 Func is for small project-level backend workflows such as bookings, RSVP,
 availability checks, protected status updates, and JSON-table reads/writes.
 Func keys are extensionless project paths like `booking` or
 `profile/settings`.
 
-```bash
-creght func list --site_id=<project_id>/<site_id>
-creght func create --site_id=<project_id>/<site_id> --key=booking --file=./booking.ts
-creght func get --site_id=<project_id>/<site_id> --key=booking
-creght func update --site_id=<project_id>/<site_id> --key=booking --file=./booking.ts
-creght func run --site_id=<project_id>/<site_id> --key=booking.create --input=./input.json
-creght func delete --site_id=<project_id>/<site_id> --key=booking
-```
+The normal workflow is file-based:
+
+1. Run `creght pull --site_id=<project_id>/<site_id> --dir=./mysite`.
+2. Edit or create files under `./mysite/backend/func/`.
+3. Run `creght push --site_id=<project_id>/<site_id> --dir=./mysite`, or keep
+   `creght sync` / `creght dev` running.
+
+Examples:
+
+- `backend/func/booking.ts` -> Func key `booking`
+- `backend/func/profile/settings.ts` -> Func key `profile/settings`
+
+Deleting a local Func file deletes the remote Func on the next push/sync.
+Renaming a local Func file is treated as delete old key + create new key.
 
 Func files should use ESM exports and the `(input, ctx)` signature:
 
@@ -431,6 +466,15 @@ await invoke("booking.create", input)
 
 Use `talizen/auth` for login, registration, logout, current-user state, and
 OAuth. Do not implement passwords, sessions, or OAuth callbacks in Func.
+
+Use `creght func run` to self-test a Func method with sample input:
+
+```bash
+creght func run --site_id=<project_id>/<site_id> --key=booking.create --input=./input.json
+```
+
+The lower-level `creght func list/get/create/update/delete` commands remain
+available for debugging and scripts, but agents should prefer the file workflow.
 
 ## Upload Assets
 
@@ -506,7 +550,6 @@ creght form list --site_id=<project_id>/<site_id>
 creght form create --site_id=<project_id>/<site_id> --key=<key> --name=<name> --schema=./schema.json
 creght table list --site_id=<project_id>/<site_id>
 creght table record create --site_id=<project_id>/<site_id> --table=<key> --data=./record.json
-creght func create --site_id=<project_id>/<site_id> --key=<key> --file=./func.ts
 creght func run --site_id=<project_id>/<site_id> --key=<key.method> --input=./input.json
 creght upload --site_id=<project_id>/<site_id> --file=./image.png
 creght version
@@ -517,8 +560,8 @@ Command meanings:
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
-- `pull`: Download the current remote site files into a local directory.
-- `push`: Push the current local directory snapshot to the remote site.
+- `pull`: Download frontend files and Func files into a local workspace.
+- `push`: Push the current local workspace snapshot to the remote site/project.
 - `sync`: Watch mode; push the current snapshot, then keep listening for local changes.
 - `dev`: Bidirectionally sync local files with cloud realtime files and the online Web editor.
 - `preview`: Open the remote preview URL for a site in the browser.
@@ -527,7 +570,7 @@ Command meanings:
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
 - `table`: Manage project JSON tables and records used by Func.
-- `func`: Manage and run project Func backend code.
+- `func`: Run or manually manage project Func backend code; prefer `backend/func` file sync for normal edits.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 

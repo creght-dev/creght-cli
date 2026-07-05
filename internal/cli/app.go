@@ -245,19 +245,37 @@ func runPull(ctx context.Context, args []string) error {
 		return err
 	}
 
-	err = writeRemoteFiles(*dir, files.List)
+	err = writeRemoteFilesToWorkspace(*dir, files.List)
+	if err != nil {
+		return err
+	}
+
+	funcs, err := client.GetProjectFuncList(ctx, projectID, url.Values{"limit": []string{"-1"}})
+	if err != nil {
+		return err
+	}
+	for i, fn := range funcs.List {
+		if strings.TrimSpace(fn.Body) == "" && strings.TrimSpace(fn.ID) != "" {
+			detail, err := client.GetProjectFunc(ctx, projectID, fn.ID)
+			if err != nil {
+				return err
+			}
+			funcs.List[i] = detail
+		}
+	}
+	err = writeProjectFuncsToWorkspace(*dir, funcs.List)
 	if err != nil {
 		return err
 	}
 
 	editorURL := siteEditorURL(defaultWebHost(cfg.APIHost), projectID, realSiteID)
-	createdAgents, err := ensurePulledAgentsFile(*dir, files.List, projectID, realSiteID, editorURL)
+	createdAgents, err := ensurePulledAgentsFile(*dir, nil, projectID, realSiteID, editorURL)
 	if err != nil {
 		return err
 	}
 
 	previewURL, _ := previewURL(ctx, client, realSiteID)
-	fmt.Printf("Pulled %d files into %s\n", len(files.List), *dir)
+	fmt.Printf("Pulled %d frontend files and %d funcs into %s\n", len(files.List), len(funcs.List), *dir)
 	if createdAgents {
 		fmt.Printf("Generated AGENTS.md for Creght agent context\n")
 	}

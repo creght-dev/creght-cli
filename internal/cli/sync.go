@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,13 +23,21 @@ type Syncer struct {
 	dir       string
 	clientID  string
 
-	mu           sync.Mutex
-	remoteByPath map[string]creght.File
+	mu              sync.Mutex
+	remoteByPath    map[string]creght.File
+	funcMu          sync.Mutex
+	remoteFuncByKey map[string]creght.ProjectFunc
 }
 
 type localFileAction struct {
 	remotePath string
 	action     creght.SiteActionChange
+}
+
+type localFuncAction struct {
+	key    string
+	action string
+	fn     creght.ProjectFunc
 }
 
 func NewSyncer(client *creght.Client, projectID string, siteID string, dir string) (*Syncer, error) {
@@ -37,12 +47,13 @@ func NewSyncer(client *creght.Client, projectID string, siteID string, dir strin
 	}
 
 	return &Syncer{
-		client:       client,
-		projectID:    projectID,
-		siteID:       siteID,
-		dir:          absDir,
-		clientID:     newClientID(),
-		remoteByPath: map[string]creght.File{},
+		client:          client,
+		projectID:       projectID,
+		siteID:          siteID,
+		dir:             absDir,
+		clientID:        newClientID(),
+		remoteByPath:    map[string]creght.File{},
+		remoteFuncByKey: map[string]creght.ProjectFunc{},
 	}, nil
 }
 
@@ -126,6 +137,11 @@ func (s *Syncer) Push(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if s.shouldSyncFuncs() {
+		if err := s.refreshRemoteFuncs(ctx); err != nil {
+			return err
+		}
+	}
 
 	return s.syncLocalSnapshot(ctx)
 }
@@ -150,43 +166,87 @@ func (s *Syncer) refreshRemote(ctx context.Context) error {
 	return nil
 }
 
+func (s *Syncer) refreshRemoteFuncs(ctx context.Context) error {
+	funcs, err := s.client.GetProjectFuncList(ctx, s.projectID, url.Values{"limit": []string{"-1"}})
+	if err != nil {
+		return err
+	}
+
+	s.funcMu.Lock()
+	defer s.funcMu.Unlock()
+
+	s.remoteFuncByKey = make(map[string]creght.ProjectFunc, len(funcs.List))
+	for _, fn := range funcs.List {
+		if strings.TrimSpace(fn.Body) == "" && strings.TrimSpace(fn.ID) != "" {
+			detail, err := s.client.GetProjectFunc(ctx, s.projectID, fn.ID)
+			if err != nil {
+				return err
+			}
+			fn = detail
+		}
+		key := normalizeLocalFuncKey(fn.Key)
+		if key == "" {
+			continue
+		}
+		s.remoteFuncByKey[key] = fn
+	}
+	return nil
+}
+
 func (s *Syncer) syncLocalSnapshot(ctx context.Context) error {
 	actions, err := s.collectLocalSnapshotActions()
 	if err != nil {
 		return err
 	}
-	if len(actions) == 0 {
+	funcActions, err := s.collectLocalFuncActions()
+	if err != nil {
+		return err
+	}
+
+	if len(actions) > 0 {
+		changes := make([]creght.SiteActionChange, 0, len(actions))
+		for _, action := range actions {
+			changes = append(changes, action.action)
+		}
+
+		_, err = s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, changes)
+		if err != nil {
+			return err
+		}
+
+		err = s.refreshRemote(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(funcActions) > 0 {
+		if err := s.applyFuncActions(ctx, funcActions); err != nil {
+			return err
+		}
+		if err := s.refreshRemoteFuncs(ctx); err != nil {
+			return err
+		}
+	}
+
+	if len(actions) == 0 && len(funcActions) == 0 {
 		fmt.Println("No local changes to push")
 		return nil
 	}
 
-	changes := make([]creght.SiteActionChange, 0, len(actions))
-	for _, action := range actions {
-		changes = append(changes, action.action)
-	}
-
-	_, err = s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, changes)
-	if err != nil {
-		return err
-	}
-
-	err = s.refreshRemote(ctx)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("synced %d changed files\n", len(actions))
+	fmt.Printf("synced %d frontend files and %d funcs\n", len(actions), len(funcActions))
 	return nil
 }
 
 func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 	var actions []localFileAction
 	localPaths := map[string]struct{}{}
-	err := filepath.WalkDir(s.dir, func(path string, d os.DirEntry, err error) error {
+	siteRoot := siteSyncRoot(s.dir)
+	err := filepath.WalkDir(siteRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if shouldSkipLocalPath(s.dir, path) {
+		if shouldSkipLocalPath(siteRoot, path) || (!hasFrontendLayout(s.dir) && isWorkspaceBackendPath(s.dir, path)) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -196,7 +256,7 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 			return nil
 		}
 
-		remotePath, err := localPathToRemote(s.dir, path)
+		remotePath, err := localPathToRemote(siteRoot, path)
 		if err != nil {
 			return err
 		}
@@ -230,6 +290,63 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 	return actions, nil
 }
 
+func (s *Syncer) shouldSyncFuncs() bool {
+	info, err := os.Stat(funcRoot(s.dir))
+	return err == nil && info.IsDir()
+}
+
+func (s *Syncer) collectLocalFuncActions() ([]localFuncAction, error) {
+	if !s.shouldSyncFuncs() {
+		return nil, nil
+	}
+
+	var actions []localFuncAction
+	localKeys := map[string]struct{}{}
+	err := filepath.WalkDir(funcRoot(s.dir), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if shouldSkipLocalPath(funcRoot(s.dir), path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		key, err := localPathToFuncKey(s.dir, path)
+		if err != nil {
+			return err
+		}
+		localKeys[key] = struct{}{}
+
+		action, changed, err := s.localFuncAction(path)
+		if err != nil {
+			return err
+		}
+		if changed {
+			actions = append(actions, action)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.funcMu.Lock()
+	for key, fn := range s.remoteFuncByKey {
+		if _, existsLocally := localKeys[key]; existsLocally {
+			continue
+		}
+		actions = append(actions, localFuncAction{key: key, action: "delete", fn: fn})
+	}
+	s.funcMu.Unlock()
+
+	return actions, nil
+}
+
 func (s *Syncer) watchDirs(watcher *fsnotify.Watcher) error {
 	return filepath.WalkDir(s.dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -250,8 +367,18 @@ func (s *Syncer) watchDirs(watcher *fsnotify.Watcher) error {
 }
 
 func (s *Syncer) handleEvent(ctx context.Context, event fsnotify.Event) error {
+	if s.shouldSyncFuncs() && isWorkspaceFuncPath(s.dir, event.Name) {
+		return s.handleFuncEvent(ctx, event)
+	}
+	if hasFrontendLayout(s.dir) && !isPathInside(siteSyncRoot(s.dir), event.Name) {
+		return nil
+	}
+	if !hasFrontendLayout(s.dir) && isWorkspaceBackendPath(s.dir, event.Name) {
+		return nil
+	}
+
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
-		remotePath, err := localPathToRemote(s.dir, event.Name)
+		remotePath, err := localWorkspacePathToRemote(s.dir, event.Name)
 		if err != nil {
 			return err
 		}
@@ -294,7 +421,7 @@ func (s *Syncer) upsertLocalFile(ctx context.Context, localPath string) error {
 }
 
 func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error) {
-	remotePath, err := localPathToRemote(s.dir, localPath)
+	remotePath, err := localWorkspacePathToRemote(s.dir, localPath)
 	if err != nil {
 		return localFileAction{}, false, err
 	}
@@ -339,6 +466,125 @@ func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error
 	}
 
 	return localFileAction{remotePath: remotePath, action: action}, true, nil
+}
+
+func (s *Syncer) handleFuncEvent(ctx context.Context, event fsnotify.Event) error {
+	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+		key, err := localPathToFuncKey(s.dir, event.Name)
+		if err != nil {
+			return err
+		}
+		return s.deleteFuncKey(ctx, key)
+	}
+	if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+		info, err := os.Stat(event.Name)
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		return s.upsertLocalFunc(ctx, event.Name)
+	}
+	return nil
+}
+
+func (s *Syncer) upsertLocalFunc(ctx context.Context, localPath string) error {
+	action, changed, err := s.localFuncAction(localPath)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.applyFuncActions(ctx, []localFuncAction{action}); err != nil {
+		return err
+	}
+	if err := s.refreshRemoteFuncs(ctx); err != nil {
+		return err
+	}
+	fmt.Printf("synced func %s\n", action.key)
+	return nil
+}
+
+func (s *Syncer) localFuncAction(localPath string) (localFuncAction, bool, error) {
+	key, err := localPathToFuncKey(s.dir, localPath)
+	if err != nil {
+		return localFuncAction{}, false, err
+	}
+	bodyBytes, err := os.ReadFile(localPath)
+	if err != nil {
+		return localFuncAction{}, false, fmt.Errorf("read func %s: %w", key, err)
+	}
+	if !isUTF8FileBody(bodyBytes) {
+		return localFuncAction{}, false, nil
+	}
+	body := string(bodyBytes)
+
+	s.funcMu.Lock()
+	remote, exist := s.remoteFuncByKey[key]
+	s.funcMu.Unlock()
+
+	if exist && remote.Body == body {
+		return localFuncAction{}, false, nil
+	}
+
+	fn := creght.ProjectFunc{
+		ID:       remote.ID,
+		Key:      key,
+		Name:     remote.Name,
+		Desc:     remote.Desc,
+		Body:     body,
+		Mimetype: remote.Mimetype,
+	}
+	if strings.TrimSpace(fn.Name) == "" {
+		fn.Name = strings.Trim(strings.TrimPrefix(key, "/"), "/")
+	}
+	if strings.TrimSpace(fn.Mimetype) == "" {
+		fn.Mimetype = "application/javascript"
+	}
+	action := "create"
+	if exist {
+		action = "update"
+	}
+
+	return localFuncAction{key: key, action: action, fn: fn}, true, nil
+}
+
+func (s *Syncer) applyFuncActions(ctx context.Context, actions []localFuncAction) error {
+	for _, action := range actions {
+		switch action.action {
+		case "create":
+			if _, err := s.client.CreateProjectFunc(ctx, s.projectID, action.fn); err != nil {
+				return err
+			}
+		case "update":
+			if err := s.client.UpdateProjectFunc(ctx, s.projectID, action.fn.ID, action.fn); err != nil {
+				return err
+			}
+		case "delete":
+			if err := s.client.DeleteProjectFunc(ctx, s.projectID, action.fn.ID); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown func action: %s", action.action)
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) deleteFuncKey(ctx context.Context, key string) error {
+	s.funcMu.Lock()
+	remote, exist := s.remoteFuncByKey[key]
+	s.funcMu.Unlock()
+	if !exist {
+		return nil
+	}
+	if err := s.client.DeleteProjectFunc(ctx, s.projectID, remote.ID); err != nil {
+		return err
+	}
+	if err := s.refreshRemoteFuncs(ctx); err != nil {
+		return err
+	}
+	fmt.Printf("deleted func %s\n", key)
+	return nil
 }
 
 func (s *Syncer) deleteRemotePath(ctx context.Context, remotePath string) error {

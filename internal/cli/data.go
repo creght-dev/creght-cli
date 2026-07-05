@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -258,7 +259,7 @@ func printContentUsage() {
 
 Usage:
   creght content list --site_id=<project_id>/<site_id> --collection=<key-or-id> [--limit=20] [--offset=0] [--filter=./filter.json]
-  creght content get --site_id=<project_id>/<site_id> --collection=<key-or-id> (--id=<id> | --slug=<slug>)
+  creght content get --site_id=<project_id>/<site_id> --collection=<key-or-id> (--id=<id> | --slug=<slug>) [--out=./content.json]
   creght content create --site_id=<project_id>/<site_id> --collection=<key-or-id> --data=./content.json [--slug=<slug>] [--sort=0]
   creght content update --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id> --data=./content.json [--slug=<slug>] [--publish=true]
   creght content delete --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id>
@@ -325,6 +326,7 @@ func runContentGet(ctx context.Context, args []string) error {
 	collection := fs.String("collection", "", "collection key or id")
 	id := fs.String("id", "", "content id")
 	slug := fs.String("slug", "", "content slug")
+	outPath := fs.String("out", "", "write JSON output to file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -353,7 +355,7 @@ func runContentGet(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return printJSON(content)
+	return outputJSON(content, *outPath)
 }
 
 func runContentCreate(ctx context.Context, args []string) error {
@@ -1042,9 +1044,27 @@ func isFullContentObject(raw json.RawMessage) bool {
 }
 
 func printJSON(v any) error {
+	return outputJSON(v, "")
+}
+
+func outputJSON(v any, outPath string) error {
 	bs, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
+	}
+	outPath = strings.TrimSpace(outPath)
+	if outPath != "" && outPath != "-" {
+		dir := filepath.Dir(outPath)
+		if dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("create output dir: %w", err)
+			}
+		}
+		if err := os.WriteFile(outPath, append(bs, '\n'), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", outPath, err)
+		}
+		fmt.Printf("Wrote %s\n", outPath)
+		return nil
 	}
 	fmt.Println(string(bs))
 	return nil

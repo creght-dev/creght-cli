@@ -139,6 +139,25 @@ func TestNormalizeTableRecordFilterAcceptsToolFieldNames(t *testing.T) {
 	}
 }
 
+func TestOutputJSONWritesFile(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "nested", "item.json")
+	output := captureStdout(t, func() {
+		if err := outputJSON(map[string]any{"ok": true}, outPath); err != nil {
+			t.Fatalf("outputJSON: %v", err)
+		}
+	})
+	if !strings.Contains(output, "Wrote "+outPath) {
+		t.Fatalf("output = %q", output)
+	}
+	body, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "{\n  \"ok\": true\n}\n" {
+		t.Fatalf("body = %q", string(body))
+	}
+}
+
 func setupTestConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())

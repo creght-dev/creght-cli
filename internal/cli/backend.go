@@ -48,7 +48,7 @@ Usage:
   creght table update --site_id=<project_id>/<site_id> (--id=<id> | --key=<key>) [--new-key=<key>] [--name=<name>] [--desc=<desc>] [--schema=./schema.json]
   creght table delete --site_id=<project_id>/<site_id> (--id=<id> | --key=<key>)
   creght table record list --site_id=<project_id>/<site_id> --table=<key-or-id> [--where=./where.json] [--filter=./filter.json]
-  creght table record get --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id>
+  creght table record get --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id> [--out=./record.json]
   creght table record create --site_id=<project_id>/<site_id> --table=<key-or-id> --data=./record.json [--sort=0]
   creght table record update --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id> --data=./patch.json [--sort=0]
   creght table record delete --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id>
@@ -306,6 +306,7 @@ func runTableRecordGet(ctx context.Context, args []string) error {
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	tableKey := fs.String("table", "", "table key or id")
 	id := fs.String("id", "", "record id")
+	outPath := fs.String("out", "", "write JSON output to file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -330,7 +331,7 @@ func runTableRecordGet(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return printJSON(record)
+	return outputJSON(record, *outPath)
 }
 
 func runTableRecordCreate(ctx context.Context, args []string) error {
