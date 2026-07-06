@@ -26,9 +26,9 @@ func TestRunTableRecordCreateResolvesTableKey(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/u/project/project-1/table_list":
+		case "/api/p/project/project-1/table_list":
 			_, _ = w.Write([]byte(`{"total":1,"list":[{"id":"table-1","key":"appointments","name":"Appointments"}]}`))
-		case "/api/u/project/project-1/table/table-1/record":
+		case "/api/p/project/project-1/table/table-1/record":
 			if r.Method != http.MethodPost {
 				t.Fatalf("method = %s, want POST", r.Method)
 			}
@@ -80,7 +80,7 @@ func TestRunFuncRunSendsInvokePayload(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/api/u/project/project-1/func/run" {
+		if r.URL.Path != "/api/p/project/project-1/func/run" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {

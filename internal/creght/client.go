@@ -476,9 +476,12 @@ func (c *Client) SubmitForm(ctx context.Context, projectID string, formKey strin
 	return c.do(ctx, http.MethodPost, path, nil, data, nil)
 }
 
+// Table and Func routes live under the primary /api/p usercenter group; unlike
+// cms/form/site they are not mirrored into the /api/u talizen-compat group, so
+// these paths intentionally use /api/p while the rest of the client uses /api/u.
 func (c *Client) GetProjectTableList(ctx context.Context, projectID string, query url.Values) (ListResponse[ProjectTable], error) {
 	var ret ListResponse[ProjectTable]
-	path := fmt.Sprintf("/api/u/project/%s/table_list", url.PathEscape(projectID))
+	path := fmt.Sprintf("/api/p/project/%s/table_list", url.PathEscape(projectID))
 	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
 	if err != nil {
 		return ListResponse[ProjectTable]{}, err
@@ -489,7 +492,7 @@ func (c *Client) GetProjectTableList(ctx context.Context, projectID string, quer
 
 func (c *Client) GetProjectTable(ctx context.Context, projectID string, tableID string) (ProjectTable, error) {
 	var ret ProjectTable
-	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
 	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
 	if err != nil {
 		return ProjectTable{}, err
@@ -500,7 +503,7 @@ func (c *Client) GetProjectTable(ctx context.Context, projectID string, tableID 
 
 func (c *Client) CreateProjectTable(ctx context.Context, projectID string, table ProjectTable) (string, error) {
 	var ret IDResponse
-	path := fmt.Sprintf("/api/u/project/%s/table", url.PathEscape(projectID))
+	path := fmt.Sprintf("/api/p/project/%s/table", url.PathEscape(projectID))
 	err := c.do(ctx, http.MethodPost, path, nil, table, &ret)
 	if err != nil {
 		return "", err
@@ -510,18 +513,18 @@ func (c *Client) CreateProjectTable(ctx context.Context, projectID string, table
 }
 
 func (c *Client) UpdateProjectTable(ctx context.Context, projectID string, tableID string, table ProjectTable) error {
-	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
 	return c.do(ctx, http.MethodPut, path, nil, table, nil)
 }
 
 func (c *Client) DeleteProjectTable(ctx context.Context, projectID string, tableID string) error {
-	path := fmt.Sprintf("/api/u/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s", url.PathEscape(projectID), url.PathEscape(tableID))
 	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
 }
 
 func (c *Client) GetProjectTableRecordList(ctx context.Context, projectID string, tableID string, query url.Values, body any) (ListResponse[ProjectTableRecord], error) {
 	var ret ListResponse[ProjectTableRecord]
-	path := fmt.Sprintf("/api/u/project/%s/table/%s/record_list", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s/record_list", url.PathEscape(projectID), url.PathEscape(tableID))
 	method := http.MethodGet
 	if body != nil {
 		method = http.MethodPost
@@ -536,7 +539,7 @@ func (c *Client) GetProjectTableRecordList(ctx context.Context, projectID string
 
 func (c *Client) GetProjectTableRecord(ctx context.Context, projectID string, tableID string, recordID string) (ProjectTableRecord, error) {
 	var ret ProjectTableRecord
-	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
 	err := c.do(ctx, http.MethodGet, path, url.Values{"id": []string{recordID}}, nil, &ret)
 	if err != nil {
 		return ProjectTableRecord{}, err
@@ -547,7 +550,7 @@ func (c *Client) GetProjectTableRecord(ctx context.Context, projectID string, ta
 
 func (c *Client) CreateProjectTableRecord(ctx context.Context, projectID string, tableID string, record ProjectTableRecord) (string, error) {
 	var ret IDResponse
-	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
 	err := c.do(ctx, http.MethodPost, path, nil, record, &ret)
 	if err != nil {
 		return "", err
@@ -557,18 +560,20 @@ func (c *Client) CreateProjectTableRecord(ctx context.Context, projectID string,
 }
 
 func (c *Client) UpdateProjectTableRecord(ctx context.Context, projectID string, tableID string, record ProjectTableRecord) error {
-	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
 	return c.do(ctx, http.MethodPut, path, nil, record, nil)
 }
 
 func (c *Client) DeleteProjectTableRecord(ctx context.Context, projectID string, tableID string, recordID string) error {
-	path := fmt.Sprintf("/api/u/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
+	path := fmt.Sprintf("/api/p/project/%s/table/%s/record", url.PathEscape(projectID), url.PathEscape(tableID))
 	return c.do(ctx, http.MethodDelete, path, nil, map[string]string{"id": recordID}, nil)
 }
 
+// Func routes live under /api/p (see the note on GetProjectTableList): they are
+// not part of the /api/u talizen-compat group, so use /api/p here.
 func (c *Client) GetProjectFuncList(ctx context.Context, projectID string, query url.Values) (ListResponse[ProjectFunc], error) {
 	var ret ListResponse[ProjectFunc]
-	path := fmt.Sprintf("/api/u/project/%s/func_list", url.PathEscape(projectID))
+	path := fmt.Sprintf("/api/p/project/%s/func_list", url.PathEscape(projectID))
 	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
 	if err != nil {
 		return ListResponse[ProjectFunc]{}, err
@@ -579,7 +584,7 @@ func (c *Client) GetProjectFuncList(ctx context.Context, projectID string, query
 
 func (c *Client) GetProjectFunc(ctx context.Context, projectID string, funcID string) (ProjectFunc, error) {
 	var ret ProjectFunc
-	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
 	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
 	if err != nil {
 		return ProjectFunc{}, err
@@ -590,7 +595,7 @@ func (c *Client) GetProjectFunc(ctx context.Context, projectID string, funcID st
 
 func (c *Client) CreateProjectFunc(ctx context.Context, projectID string, fn ProjectFunc) (string, error) {
 	var ret IDResponse
-	path := fmt.Sprintf("/api/u/project/%s/func", url.PathEscape(projectID))
+	path := fmt.Sprintf("/api/p/project/%s/func", url.PathEscape(projectID))
 	err := c.do(ctx, http.MethodPost, path, nil, fn, &ret)
 	if err != nil {
 		return "", err
@@ -600,18 +605,18 @@ func (c *Client) CreateProjectFunc(ctx context.Context, projectID string, fn Pro
 }
 
 func (c *Client) UpdateProjectFunc(ctx context.Context, projectID string, funcID string, fn ProjectFunc) error {
-	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
 	return c.do(ctx, http.MethodPut, path, nil, fn, nil)
 }
 
 func (c *Client) DeleteProjectFunc(ctx context.Context, projectID string, funcID string) error {
-	path := fmt.Sprintf("/api/u/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
+	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
 	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
 }
 
 func (c *Client) RunProjectFunc(ctx context.Context, projectID string, body map[string]any) (RunFuncResponse, error) {
 	var ret RunFuncResponse
-	path := fmt.Sprintf("/api/u/project/%s/func/run", url.PathEscape(projectID))
+	path := fmt.Sprintf("/api/p/project/%s/func/run", url.PathEscape(projectID))
 	err := c.do(ctx, http.MethodPost, path, nil, body, &ret)
 	if err != nil {
 		return RunFuncResponse{}, err
