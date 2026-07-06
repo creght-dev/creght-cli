@@ -91,7 +91,7 @@ func runDev(ctx context.Context, args []string) error {
 		remoteApply: map[string]time.Time{},
 	}
 
-	editorURL := fmt.Sprintf("%s/editor/project/%s/site/%s", dev.webHost, url.PathEscape(projectID), url.PathEscape(realSiteID))
+	editorURL := fmt.Sprintf("%s/teditor/project/%s/site/%s", dev.webHost, url.PathEscape(projectID), url.PathEscape(realSiteID))
 	fmt.Printf("Web editor:  %s\n", editorURL)
 	fmt.Printf("Local files: %s\n", dev.dir)
 	fmt.Printf("Remote API:  %s\n", dev.apiHost)

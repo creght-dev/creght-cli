@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -225,6 +226,7 @@ func runPull(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
+	force := fs.Bool("force", false, "overwrite local files with the remote workspace")
 	err := fs.Parse(args)
 	if err != nil {
 		return err
@@ -245,11 +247,6 @@ func runPull(ctx context.Context, args []string) error {
 		return err
 	}
 
-	err = writeRemoteFilesToWorkspace(*dir, files.List)
-	if err != nil {
-		return err
-	}
-
 	funcs, err := client.GetProjectFuncList(ctx, projectID, url.Values{"limit": []string{"-1"}})
 	if err != nil {
 		return err
@@ -263,9 +260,25 @@ func runPull(ctx context.Context, args []string) error {
 			funcs.List[i] = detail
 		}
 	}
-	err = writeProjectFuncsToWorkspace(*dir, funcs.List)
-	if err != nil {
-		return err
+	fileChangeCount := len(files.List)
+	funcChangeCount := len(funcs.List)
+	if *force {
+		err = writeRemoteFilesToWorkspace(*dir, files.List)
+		if err != nil {
+			return err
+		}
+		err = writeProjectFuncsToWorkspace(*dir, funcs.List)
+		if err != nil {
+			return err
+		}
+		if err := saveWorkspaceState(*dir, projectID+"/"+realSiteID, remoteFileSnapshot(files.List), remoteFuncSnapshot(funcs.List)); err != nil {
+			return err
+		}
+	} else {
+		fileChangeCount, funcChangeCount, err = safePullWorkspace(*dir, projectID+"/"+realSiteID, remoteFileSnapshot(files.List), remoteFuncSnapshot(funcs.List))
+		if err != nil {
+			return err
+		}
 	}
 
 	editorURL := siteEditorURL(defaultWebHost(cfg.APIHost), projectID, realSiteID)
@@ -275,7 +288,7 @@ func runPull(ctx context.Context, args []string) error {
 	}
 
 	previewURL, _ := previewURL(ctx, client, realSiteID)
-	fmt.Printf("Pulled %d frontend files and %d funcs into %s\n", len(files.List), len(funcs.List), *dir)
+	fmt.Printf("Pulled %d frontend changes and %d func changes into %s\n", fileChangeCount, funcChangeCount, *dir)
 	if createdAgents {
 		fmt.Printf("Generated AGENTS.md for Creght agent context\n")
 	}
@@ -287,8 +300,112 @@ func runPull(ctx context.Context, args []string) error {
 	return nil
 }
 
+func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapshotEntry, remoteFuncs map[string]snapshotEntry) (int, int, error) {
+	state, hasState, err := loadWorkspaceState(root)
+	if err != nil {
+		return 0, 0, err
+	}
+	if hasState && strings.TrimSpace(state.SiteID) != "" && state.SiteID != siteID {
+		return 0, 0, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, siteID)
+	}
+
+	localFiles, err := localFileSnapshot(root)
+	if err != nil {
+		return 0, 0, err
+	}
+	localFuncs, err := localFuncSnapshot(root)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	filePlan := buildPullEntryPlan("file", state.Files, hasState, localFiles, remoteFiles)
+	funcPlan := buildPullEntryPlan("func", state.Funcs, hasState, localFuncs, remoteFuncs)
+	conflicts := append(filePlan.Conflicts, funcPlan.Conflicts...)
+	if len(conflicts) > 0 {
+		for _, conflict := range conflicts {
+			fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
+		}
+		return 0, 0, fmt.Errorf("pull has conflicts; resolve local changes first, or use --force to overwrite local files")
+	}
+
+	for _, entry := range filePlan.Writes {
+		if err := writePulledFile(root, entry); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, path := range filePlan.Deletes {
+		if err := deletePulledFile(root, path); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, entry := range funcPlan.Writes {
+		if err := writePulledFunc(root, entry); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, key := range funcPlan.Deletes {
+		if err := deletePulledFunc(root, key); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := saveWorkspaceState(root, siteID, remoteFiles, remoteFuncs); err != nil {
+		return 0, 0, err
+	}
+	return len(filePlan.Writes) + len(filePlan.Deletes), len(funcPlan.Writes) + len(funcPlan.Deletes), nil
+}
+
+func writePulledFile(root string, entry snapshotEntry) error {
+	localPath, err := remotePathToWorkspaceLocal(root, entry.Path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return fmt.Errorf("create parent dir for %s: %w", entry.Path, err)
+	}
+	if err := os.WriteFile(localPath, []byte(entry.Body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", entry.Path, err)
+	}
+	return nil
+}
+
+func deletePulledFile(root string, remotePath string) error {
+	localPath, err := remotePathToWorkspaceLocal(root, remotePath)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete %s: %w", remotePath, err)
+	}
+	return nil
+}
+
+func writePulledFunc(root string, entry snapshotEntry) error {
+	localPath, err := funcKeyToLocalPath(root, entry.Path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return fmt.Errorf("create func parent for %s: %w", entry.Path, err)
+	}
+	if err := os.WriteFile(localPath, []byte(entry.Body), 0o644); err != nil {
+		return fmt.Errorf("write func %s: %w", entry.Path, err)
+	}
+	return nil
+}
+
+func deletePulledFunc(root string, key string) error {
+	localPath, err := funcKeyToLocalPath(root, key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete func %s: %w", key, err)
+	}
+	return nil
+}
+
 func siteEditorURL(webHost string, projectID string, siteID string) string {
-	return fmt.Sprintf("%s/editor/project/%s/site/%s", strings.TrimRight(webHost, "/"), url.PathEscape(projectID), url.PathEscape(siteID))
+	return fmt.Sprintf("%s/teditor/project/%s/site/%s", strings.TrimRight(webHost, "/"), url.PathEscape(projectID), url.PathEscape(siteID))
 }
 
 func runSync(ctx context.Context, args []string) error {
@@ -327,6 +444,8 @@ func runPush(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("push", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
+	allowDelete := fs.Bool("delete", false, "delete remote files/functions that were removed locally")
+	force := fs.Bool("force", false, "overwrite remote with the local workspace snapshot")
 	err := fs.Parse(args)
 	if err != nil {
 		return err
@@ -347,11 +466,51 @@ func runPush(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if err := syncer.Push(ctx); err != nil {
+	if *force {
+		if err := syncer.Push(ctx); err != nil {
+			return err
+		}
+	} else if err := syncer.PushSafe(ctx, *allowDelete); err != nil {
 		return err
 	}
 
 	fmt.Printf("Pushed %s -> %s/%s\n", syncer.dir, projectID, realSiteID)
+	return nil
+}
+
+func runDiff(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("diff", flag.ContinueOnError)
+	siteID := fs.String("site_id", "", "project_id/site_id")
+	dir := fs.String("dir", ".", "local directory")
+	allowDelete := fs.Bool("delete", false, "show remote deletions for files/functions removed locally")
+	err := fs.Parse(args)
+	if err != nil {
+		return err
+	}
+
+	projectID, realSiteID, err := parseSiteRef(*siteID)
+	if err != nil {
+		return err
+	}
+
+	client, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+
+	syncer, err := NewSyncer(client, projectID, realSiteID, *dir)
+	if err != nil {
+		return err
+	}
+
+	plan, err := syncer.BuildPlan(ctx, *allowDelete)
+	if err != nil {
+		return err
+	}
+	printSyncPlan(plan, true)
+	if plan.hasConflicts() {
+		return fmt.Errorf("diff has conflicts; run creght pull to refresh the local workspace, or inspect the remote changes before pushing")
+	}
 	return nil
 }
 

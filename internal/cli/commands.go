@@ -69,7 +69,8 @@ Current API host: %s`, helpAPIHost()),
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download frontend and Func files into a local workspace.", runPull))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Push the current local workspace snapshot to Creght.", runPush))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local frontend and Func changes before pushing.", runDiff))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local frontend and Func changes to Creght.", runPush))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local frontend and Func files and sync changes back to Creght.", runSync))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
@@ -161,6 +162,16 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
 		flags.String("dir", ".", "Local Creght project directory.")
+		if name == "pull" {
+			flags.Bool("force", false, "Overwrite local files with the remote workspace.")
+		}
+		if name == "push" {
+			flags.Bool("delete", false, "Delete remote files/functions that were removed locally.")
+			flags.Bool("force", false, "Overwrite remote with the local workspace snapshot.")
+		}
+		if name == "diff" {
+			flags.Bool("delete", false, "Show remote deletions for files/functions removed locally.")
+		}
 	})
 }
 
