@@ -64,22 +64,35 @@ func TestWorkspacePathMapping(t *testing.T) {
 	}
 }
 
-func TestFuncPathMapping(t *testing.T) {
+func TestBackendPathMapping(t *testing.T) {
 	dir := t.TempDir()
-	localPath, err := funcKeyToLocalPath(dir, "/profile/settings")
+	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backend files keep their /backend/ prefix on both sides of the mapping.
+	localPath, err := remotePathToWorkspaceLocal(dir, "/backend/func/booking.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if localPath != filepath.Join(dir, "backend", "func", "profile", "settings.ts") {
+	if localPath != filepath.Join(dir, "backend", "func", "booking.ts") {
 		t.Fatalf("localPath = %q", localPath)
 	}
 
-	key, err := localPathToFuncKey(dir, localPath)
+	remotePath, err := localWorkspacePathToRemote(dir, localPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key != "/profile/settings" {
-		t.Fatalf("key = %q", key)
+	if remotePath != "/backend/func/booking.ts" {
+		t.Fatalf("remotePath = %q", remotePath)
+	}
+
+	nested, err := remotePathToWorkspaceLocal(dir, "/backend/func/profile/settings.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nested != filepath.Join(dir, "backend", "func", "profile", "settings.ts") {
+		t.Fatalf("nested localPath = %q", nested)
 	}
 }
 

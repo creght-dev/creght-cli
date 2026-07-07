@@ -8,8 +8,6 @@ func TestBuildSyncPlanKeepsRemoteOnlyFilesWithoutBase(t *testing.T) {
 		map[string]snapshotEntry{
 			"/messages/zh-CN.json": {ID: "remote-id", Path: "/messages/zh-CN.json", Hash: "remote-hash"},
 		},
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		false,
 	)
 
@@ -30,8 +28,6 @@ func TestBuildSyncPlanSkipsDeletesByDefault(t *testing.T) {
 	plan := buildSyncPlan(state, true,
 		map[string]snapshotEntry{},
 		remote,
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		false,
 	)
 
@@ -45,8 +41,6 @@ func TestBuildSyncPlanSkipsDeletesByDefault(t *testing.T) {
 	deletePlan := buildSyncPlan(state, true,
 		map[string]snapshotEntry{},
 		remote,
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		true,
 	)
 	if len(deletePlan.FileActions) != 1 || deletePlan.FileActions[0].action.Action != "file_delete" {
@@ -67,8 +61,6 @@ func TestBuildSyncPlanKeepsRemoteUpdateWhenLocalUnchanged(t *testing.T) {
 		map[string]snapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"},
 		},
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		false,
 	)
 
@@ -161,8 +153,6 @@ func TestBuildSyncPlanConflictsWhenBothSidesChanged(t *testing.T) {
 		map[string]snapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"},
 		},
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		false,
 	)
 
@@ -174,30 +164,28 @@ func TestBuildSyncPlanConflictsWhenBothSidesChanged(t *testing.T) {
 	}
 }
 
-func TestBuildSyncPlanUpdatesFuncAndPreservesMetadata(t *testing.T) {
-	baseBody := "export function main() { return 'old' }\n"
-	state := workspaceState{Funcs: map[string]stateEntry{
-		"/booking": {Hash: stableBodyHash(baseBody)},
+func TestBuildSyncPlanUpdatesBackendFile(t *testing.T) {
+	baseHash := testHash(t, "export function main() { return 'old' }\n")
+	newBody := "export function main() { return 'new' }\n"
+	state := workspaceState{Files: map[string]stateEntry{
+		"/backend/func/booking.ts": {Hash: baseHash},
 	}}
 
 	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{},
 		map[string]snapshotEntry{
-			"/booking": {Path: "/booking", Hash: stableBodyHash("export function main() { return 'new' }\n"), Body: "export function main() { return 'new' }\n"},
+			"/backend/func/booking.ts": {Path: "/backend/func/booking.ts", Hash: testHash(t, newBody), Body: newBody},
 		},
 		map[string]snapshotEntry{
-			"/booking": {ID: "func-id", Path: "/booking", Hash: stableBodyHash(baseBody), Body: baseBody, Name: "Booking API", Desc: "desc", Mimetype: "application/typescript"},
+			"/backend/func/booking.ts": {ID: "file-id", Path: "/backend/func/booking.ts", Hash: baseHash, Body: "export function main() { return 'old' }\n"},
 		},
 		false,
 	)
 
-	if len(plan.FuncActions) != 1 || plan.FuncActions[0].action != "update" {
-		t.Fatalf("got func actions %+v, want one update", plan.FuncActions)
+	if len(plan.FileActions) != 1 || plan.FileActions[0].action.Action != "file_update" {
+		t.Fatalf("got file actions %+v, want one file_update", plan.FileActions)
 	}
-	fn := plan.FuncActions[0].fn
-	if fn.ID != "func-id" || fn.Name != "Booking API" || fn.Desc != "desc" || fn.Mimetype != "application/typescript" {
-		t.Fatalf("metadata was not preserved: %+v", fn)
+	if plan.FileActions[0].remotePath != "/backend/func/booking.ts" {
+		t.Fatalf("got remote path %q, want /backend/func/booking.ts", plan.FileActions[0].remotePath)
 	}
 }
 

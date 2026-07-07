@@ -12,15 +12,14 @@ import (
 const (
 	workspaceFrontendDir = "frontend"
 	workspaceBackendDir  = "backend"
-	workspaceFuncDir     = "func"
 )
 
 func frontendRoot(root string) string {
 	return filepath.Join(root, workspaceFrontendDir)
 }
 
-func funcRoot(root string) string {
-	return filepath.Join(root, workspaceBackendDir, workspaceFuncDir)
+func backendRoot(root string) string {
+	return filepath.Join(root, workspaceBackendDir)
 }
 
 func hasFrontendLayout(root string) bool {
@@ -33,6 +32,39 @@ func siteSyncRoot(root string) string {
 		return frontendRoot(root)
 	}
 	return root
+}
+
+// workspaceSyncRoots returns the local directories whose files are synced as
+// ordinary site files. With the standard layout the frontend and backend trees
+// are separate top-level directories; the flat legacy layout syncs the whole
+// workspace root.
+func workspaceSyncRoots(root string) []string {
+	if hasFrontendLayout(root) {
+		return []string{frontendRoot(root), backendRoot(root)}
+	}
+	return []string{root}
+}
+
+// isWorkspaceSyncablePath reports whether a local path is within one of the
+// workspace sync roots and therefore mirrors a remote site file.
+func isWorkspaceSyncablePath(root string, path string) bool {
+	for _, syncRoot := range workspaceSyncRoots(root) {
+		if isPathInside(syncRoot, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// isBackendRemotePath reports whether a remote site path lives under the
+// /backend/ prefix (for example /backend/func/booking.ts).
+func isBackendRemotePath(remotePath string) bool {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(remotePath), "/")))
+	if clean == "." || clean == "" {
+		return false
+	}
+	parts := strings.SplitN(clean, "/", 2)
+	return parts[0] == workspaceBackendDir
 }
 
 func remotePathToLocal(root string, remotePath string) (string, error) {
@@ -61,11 +93,24 @@ func localPathToRemote(root string, localPath string) (string, error) {
 	return "/" + filepath.ToSlash(rel), nil
 }
 
+// remotePathToWorkspaceLocal maps a remote site path to its local workspace
+// path. Backend files keep their /backend/ prefix (remote /backend/func/x.ts ->
+// local backend/func/x.ts) while all other files are written under frontend/
+// (remote /page/x.tsx -> local frontend/page/x.tsx).
 func remotePathToWorkspaceLocal(root string, remotePath string) (string, error) {
+	if isBackendRemotePath(remotePath) {
+		return remotePathToLocal(root, remotePath)
+	}
 	return remotePathToLocal(frontendRoot(root), remotePath)
 }
 
+// localWorkspacePathToRemote is the inverse of remotePathToWorkspaceLocal. Files
+// under backend/ keep that prefix in the remote path; files under frontend/ (or
+// the flat workspace root) have that root stripped.
 func localWorkspacePathToRemote(root string, localPath string) (string, error) {
+	if isWorkspaceBackendPath(root, localPath) {
+		return localPathToRemote(root, localPath)
+	}
 	return localPathToRemote(siteSyncRoot(root), localPath)
 }
 
@@ -78,14 +123,6 @@ func isWorkspaceBackendPath(root string, path string) bool {
 	return len(parts) > 0 && parts[0] == workspaceBackendDir
 }
 
-func isWorkspaceFuncPath(root string, path string) bool {
-	rel, err := filepath.Rel(funcRoot(root), path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return false
-	}
-	return true
-}
-
 func isPathInside(root string, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
@@ -94,54 +131,8 @@ func isPathInside(root string, path string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
-func funcKeyToLocalPath(root string, key string) (string, error) {
-	key = normalizeLocalFuncKey(key)
-	if key == "" {
-		return "", fmt.Errorf("func key is required")
-	}
-	if strings.Contains(key, "\x00") || strings.Contains(key, "..") {
-		return "", fmt.Errorf("invalid func key: %s", key)
-	}
-	clean := filepath.Clean(strings.TrimPrefix(key, "/"))
-	if clean == "." || strings.HasPrefix(clean, "..") {
-		return "", fmt.Errorf("unsafe func key: %s", key)
-	}
-	if filepath.Ext(clean) == "" {
-		clean += ".ts"
-	}
-	return filepath.Join(funcRoot(root), clean), nil
-}
-
-func localPathToFuncKey(root string, path string) (string, error) {
-	rel, err := filepath.Rel(funcRoot(root), path)
-	if err != nil {
-		return "", fmt.Errorf("relative func path: %w", err)
-	}
-	if rel == "." || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path is outside func dir: %s", path)
-	}
-	rel = filepath.ToSlash(rel)
-	ext := filepath.Ext(rel)
-	switch ext {
-	case ".ts", ".js", ".tsx", ".jsx", ".mjs", ".mts":
-		rel = strings.TrimSuffix(rel, ext)
-	}
-	return normalizeLocalFuncKey(rel), nil
-}
-
-func normalizeLocalFuncKey(key string) string {
-	key = strings.TrimSpace(key)
-	key = strings.TrimSuffix(key, filepath.Ext(key))
-	key = strings.Trim(key, "/")
-	if key == "" {
-		return ""
-	}
-	return "/" + filepath.ToSlash(key)
-}
-
-func writeRemoteFiles(root string, files []creght.File) error {
-	err := os.MkdirAll(root, 0o755)
-	if err != nil {
+func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
 
@@ -150,7 +141,7 @@ func writeRemoteFiles(root string, files []creght.File) error {
 			continue
 		}
 
-		localPath, err := remotePathToLocal(root, file.Path)
+		localPath, err := remotePathToWorkspaceLocal(root, file.Path)
 		if err != nil {
 			return err
 		}
@@ -166,32 +157,6 @@ func writeRemoteFiles(root string, files []creght.File) error {
 		}
 	}
 
-	return nil
-}
-
-func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
-	return writeRemoteFiles(frontendRoot(root), files)
-}
-
-func writeProjectFuncsToWorkspace(root string, funcs []creght.ProjectFunc) error {
-	if err := os.MkdirAll(funcRoot(root), 0o755); err != nil {
-		return fmt.Errorf("create func dir: %w", err)
-	}
-	for _, fn := range funcs {
-		if strings.TrimSpace(fn.Body) == "" {
-			continue
-		}
-		localPath, err := funcKeyToLocalPath(root, fn.Key)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
-			return fmt.Errorf("create func parent for %s: %w", fn.Key, err)
-		}
-		if err := os.WriteFile(localPath, []byte(fn.Body), 0o644); err != nil {
-			return fmt.Errorf("write func %s: %w", fn.Key, err)
-		}
-	}
 	return nil
 }
 
@@ -240,10 +205,17 @@ Editor URL: %s
 Workspace layout:
 
 - frontend/ contains Creght site files such as page/, component/, and
-  talizen.config.ts.
-- backend/func/ contains project Func backend code. For example,
-  backend/func/booking.ts maps to Func key booking, and
-  backend/func/profile/settings.ts maps to Func key profile/settings.
+  talizen.config.ts. These map to remote site paths with the frontend/ root
+  stripped (frontend/page/x.tsx <-> /page/x.tsx).
+- backend/ contains site files that keep their backend/ prefix in the remote
+  path (backend/func/booking.ts <-> /backend/func/booking.ts). Func backend
+  code lives under backend/func/; for example backend/func/booking.ts is the
+  Func with key booking and backend/func/profile/settings.ts is profile/settings.
+
+Func code is just ordinary site source under backend/func/. It is synced,
+versioned, and published together with the site through the normal pull, push,
+sync, and dev flows. The only dedicated Func endpoint is invocation, used by
+creght func run to test a Func with sample input.
 
 Use the Creght CLI for ongoing maintenance:
 

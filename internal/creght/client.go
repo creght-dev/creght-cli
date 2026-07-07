@@ -242,19 +242,6 @@ type ProjectTableRecord struct {
 	UpdatedAt string          `json:"updated_at,omitempty"`
 }
 
-type ProjectFunc struct {
-	ID        string `json:"id,omitempty"`
-	ProjectID string `json:"project_id,omitempty"`
-	Key       string `json:"key,omitempty"`
-	UserID    int64  `json:"user_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Desc      string `json:"desc,omitempty"`
-	Body      string `json:"body,omitempty"`
-	Mimetype  string `json:"mimetype,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-}
-
 type RunFuncResponse struct {
 	OK      bool            `json:"ok"`
 	Result  json.RawMessage `json:"result,omitempty"`
@@ -569,51 +556,11 @@ func (c *Client) DeleteProjectTableRecord(ctx context.Context, projectID string,
 	return c.do(ctx, http.MethodDelete, path, nil, map[string]string{"id": recordID}, nil)
 }
 
-// Func routes live under /api/p (see the note on GetProjectTableList): they are
-// not part of the /api/u talizen-compat group, so use /api/p here.
-func (c *Client) GetProjectFuncList(ctx context.Context, projectID string, query url.Values) (ListResponse[ProjectFunc], error) {
-	var ret ListResponse[ProjectFunc]
-	path := fmt.Sprintf("/api/p/project/%s/func_list", url.PathEscape(projectID))
-	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
-	if err != nil {
-		return ListResponse[ProjectFunc]{}, err
-	}
-
-	return ret, nil
-}
-
-func (c *Client) GetProjectFunc(ctx context.Context, projectID string, funcID string) (ProjectFunc, error) {
-	var ret ProjectFunc
-	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
-	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
-	if err != nil {
-		return ProjectFunc{}, err
-	}
-
-	return ret, nil
-}
-
-func (c *Client) CreateProjectFunc(ctx context.Context, projectID string, fn ProjectFunc) (string, error) {
-	var ret IDResponse
-	path := fmt.Sprintf("/api/p/project/%s/func", url.PathEscape(projectID))
-	err := c.do(ctx, http.MethodPost, path, nil, fn, &ret)
-	if err != nil {
-		return "", err
-	}
-
-	return ret.ID, nil
-}
-
-func (c *Client) UpdateProjectFunc(ctx context.Context, projectID string, funcID string, fn ProjectFunc) error {
-	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
-	return c.do(ctx, http.MethodPut, path, nil, fn, nil)
-}
-
-func (c *Client) DeleteProjectFunc(ctx context.Context, projectID string, funcID string) error {
-	path := fmt.Sprintf("/api/p/project/%s/func/%s", url.PathEscape(projectID), url.PathEscape(funcID))
-	return c.do(ctx, http.MethodDelete, path, nil, nil, nil)
-}
-
+// Func code is now stored as ordinary site source files under /backend/func/ and
+// synced through the site file_list / site_action endpoints. The only dedicated
+// func endpoint that remains is invocation, which lives under /api/p (see the
+// note on GetProjectTableList): it is not part of the /api/u talizen-compat
+// group, so use /api/p here.
 func (c *Client) RunProjectFunc(ctx context.Context, projectID string, body map[string]any) (RunFuncResponse, error) {
 	var ret RunFuncResponse
 	path := fmt.Sprintf("/api/p/project/%s/func/run", url.PathEscape(projectID))

@@ -80,13 +80,14 @@ func TestCollectLocalSnapshotActions(t *testing.T) {
 	}
 }
 
-func TestCollectLocalFuncActions(t *testing.T) {
+func TestCollectLocalSnapshotActionsIncludesBackendFiles(t *testing.T) {
 	dir := t.TempDir()
 	funcDir := filepath.Join(dir, "backend", "func")
 	if err := os.MkdirAll(filepath.Join(funcDir, "profile"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(funcDir, "same.ts"), []byte("export function main() { return 'same' }\n"), 0o644); err != nil {
+	sameBody := []byte("export function main() { return 'same' }\n")
+	if err := os.WriteFile(filepath.Join(funcDir, "same.ts"), sameBody, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(funcDir, "changed.ts"), []byte("export function main() { return 'new' }\n"), 0o644); err != nil {
@@ -96,47 +97,52 @@ func TestCollectLocalFuncActions(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sameHash, err := qetagHash(sameBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	s := &Syncer{
 		dir: dir,
-		remoteFuncByKey: map[string]creght.ProjectFunc{
-			"/same": {
+		remoteByPath: map[string]creght.File{
+			"/backend/func/same.ts": {
 				ID:   "same-id",
-				Key:  "/same",
-				Body: "export function main() { return 'same' }\n",
+				Path: "/backend/func/same.ts",
+				Hash: sameHash,
 			},
-			"/changed": {
+			"/backend/func/changed.ts": {
 				ID:   "changed-id",
-				Key:  "/changed",
-				Body: "export function main() { return 'old' }\n",
+				Path: "/backend/func/changed.ts",
+				Hash: "old-hash",
 			},
-			"/deleted": {
+			"/backend/func/deleted.ts": {
 				ID:   "deleted-id",
-				Key:  "/deleted",
-				Body: "export function main() { return 'deleted' }\n",
+				Path: "/backend/func/deleted.ts",
+				Hash: "deleted-hash",
 			},
 		},
 	}
 
-	actions, err := s.collectLocalFuncActions()
+	actions, err := s.collectLocalSnapshotActions()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	got := map[string]string{}
 	for _, action := range actions {
-		got[action.key] = action.action
+		got[action.remotePath] = action.action.Action
 	}
 	want := map[string]string{
-		"/changed":         "update",
-		"/profile/created": "create",
-		"/deleted":         "delete",
+		"/backend/func/changed.ts":         "file_update",
+		"/backend/func/profile/created.ts": "file_create",
+		"/backend/func/deleted.ts":         "file_delete",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got actions %v, want %v", got, want)
 	}
-	for key, action := range want {
-		if got[key] != action {
-			t.Fatalf("got action for %s = %q, want %q; all actions: %v", key, got[key], action, got)
+	for path, action := range want {
+		if got[path] != action {
+			t.Fatalf("got action for %s = %q, want %q; all actions: %v", path, got[path], action, got)
 		}
 	}
 }

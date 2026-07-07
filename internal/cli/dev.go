@@ -623,50 +623,41 @@ func (d *DevSyncer) mirrorRemoteToLocal(ctx context.Context) error {
 		}
 	}
 
-	funcs, err := d.client.GetProjectFuncList(ctx, d.projectID, url.Values{"limit": []string{"-1"}})
-	if err != nil {
-		return err
-	}
-	for i, fn := range funcs.List {
-		if strings.TrimSpace(fn.Body) == "" && strings.TrimSpace(fn.ID) != "" {
-			detail, err := d.client.GetProjectFunc(ctx, d.projectID, fn.ID)
+	for _, syncRoot := range workspaceSyncRoots(d.dir) {
+		if _, err := os.Stat(syncRoot); os.IsNotExist(err) {
+			continue
+		}
+		err := filepath.WalkDir(syncRoot, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			funcs.List[i] = detail
-		}
-	}
-	if err := writeProjectFuncsToWorkspace(d.dir, funcs.List); err != nil {
-		return err
-	}
-
-	siteRoot := siteSyncRoot(d.dir)
-	return filepath.WalkDir(siteRoot, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if shouldSkipLocalPath(siteRoot, path) {
+			if shouldSkipLocalPath(syncRoot, path) {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 			if entry.IsDir() {
-				return filepath.SkipDir
+				return nil
+			}
+			remotePath, err := localWorkspacePathToRemote(d.dir, path)
+			if err != nil {
+				return err
+			}
+			if _, ok := remotePaths[remotePath]; ok {
+				return nil
+			}
+			d.markRemoteApply(path)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove local deleted remote file %s: %w", remotePath, err)
 			}
 			return nil
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		remotePath, err := localPathToRemote(siteRoot, path)
+		})
 		if err != nil {
 			return err
 		}
-		if _, ok := remotePaths[remotePath]; ok {
-			return nil
-		}
-		d.markRemoteApply(path)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove local deleted remote file %s: %w", remotePath, err)
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func (d *DevSyncer) writeRemoteFileToLocal(remotePath string, body string) error {
