@@ -374,13 +374,35 @@ func (c *Client) CreateContent(ctx context.Context, projectID string, appID stri
 	return ret.ID, nil
 }
 
-func (c *Client) UpdateContent(ctx context.Context, projectID string, appID string, content Content, publish bool) error {
+// UpdateResult 是内容更新接口的响应：OK=false 表示服务端没有更新任何字段，Message 说明原因。
+type UpdateResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+func (c *Client) UpdateContent(ctx context.Context, projectID string, appID string, content Content, publish bool) (UpdateResult, error) {
 	path := fmt.Sprintf("/api/u/project/%s/cms/%s/content", url.PathEscape(projectID), url.PathEscape(appID))
 	body, err := contentRequestBody(content, publish)
 	if err != nil {
-		return err
+		return UpdateResult{}, err
 	}
-	return c.do(ctx, http.MethodPut, path, nil, body, nil)
+
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodPut, path, nil, body, &raw); err != nil {
+		return UpdateResult{}, err
+	}
+
+	// 兼容旧服务端：响应是字符串 "ok"
+	var legacy string
+	if json.Unmarshal(raw, &legacy) == nil {
+		return UpdateResult{OK: true}, nil
+	}
+
+	var ret UpdateResult
+	if err := json.Unmarshal(raw, &ret); err != nil {
+		return UpdateResult{}, fmt.Errorf("parse update content response: %w", err)
+	}
+	return ret, nil
 }
 
 func (c *Client) DeleteContent(ctx context.Context, projectID string, appID string, contentID string) error {

@@ -124,7 +124,30 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 }
 
+// requireWorkspace 校验 s.dir 是一个已 pull 的、属于目标站点的工作区。
+// push/sync/diff 不允许把任意目录隐式当作工作区（曾发生误从无关目录 push 导致整棵仓库被上传）。
+func (s *Syncer) requireWorkspace() error {
+	state, hasState, err := loadWorkspaceState(s.dir)
+	if err != nil {
+		return err
+	}
+	if !hasState {
+		return fmt.Errorf(
+			"%s is not a creght workspace (missing .creght/state.json); run `creght pull --site_id=%s --dir=%s` first, or pass --dir pointing at a pulled workspace",
+			s.dir, s.siteRef(), s.dir,
+		)
+	}
+	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
+		return fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
+	}
+	return nil
+}
+
 func (s *Syncer) Push(ctx context.Context) error {
+	if err := s.requireWorkspace(); err != nil {
+		return err
+	}
+
 	err := os.MkdirAll(s.dir, 0o755)
 	if err != nil {
 		return fmt.Errorf("create local dir: %w", err)
@@ -191,7 +214,14 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 	if err != nil {
 		return syncPlanContext{}, err
 	}
-	if hasState && strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
+	if !hasState {
+		// 不允许把任意目录隐式当作工作区：曾发生误从无关目录 push 导致整棵仓库被上传。
+		return syncPlanContext{}, fmt.Errorf(
+			"%s is not a creght workspace (missing .creght/state.json); run `creght pull --site_id=%s --dir=%s` first, or pass --dir pointing at a pulled workspace",
+			s.dir, s.siteRef(), s.dir,
+		)
+	}
+	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return syncPlanContext{}, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
 	}
 

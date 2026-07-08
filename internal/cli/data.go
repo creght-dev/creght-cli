@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bysir/creght-cli/internal/creght"
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -265,12 +266,10 @@ Usage:
   creght content delete --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id>
 
 Notes:
-  Plain --data JSON is treated as the CMS content body, even when it contains a
-  business field named "body". JSON is treated as a full content object only
-  when it includes fields such as id, slug, status, sort, or tags.
-  If your business JSON has a top-level slug, either pass it as --slug and omit
-  it from --data, or wrap business fields under body, for example:
-  {"slug":"hello-world","body":{"title":"Hello world","tags":["news"]}}`)
+  --data must be a full content object with the business fields wrapped under
+  an object-valued "body" key (this is the only accepted format):
+  {"slug":"hello-world","sort":1,"body":{"title":"Hello world","tags":["news"]}}
+  slug and sort are optional in the file; --slug/--sort flags take precedence.`)
 }
 
 func runContentList(ctx context.Context, args []string) error {
@@ -437,8 +436,17 @@ func runContentUpdate(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if err := client.UpdateContent(ctx, projectID, appID, content, *publish); err != nil {
+	ret, err := client.UpdateContent(ctx, projectID, appID, content, *publish)
+	if err != nil {
 		return err
+	}
+	if !ret.OK {
+		// 服务端明确表示没有更新任何字段：把信息透出给人/agent，并以非零码退出。
+		msg := ret.Message
+		if msg == "" {
+			msg = "no fields were updated"
+		}
+		return fmt.Errorf("not updated: %s", msg)
 	}
 
 	fmt.Println("ok")
@@ -918,6 +926,8 @@ func formFromInputs(schemaPath string, settingPath string, key string, newKey st
 	return form, nil
 }
 
+// contentFromDataFile 只接受一种格式：完整 content 对象，业务字段包在对象类型的 "body" 键下。
+// 曾经的“裸 body 自动嗅探”会在 body 含 tags/slug/sort 等同名业务字段时误判并静默丢字段，已移除。
 func contentFromDataFile(path string) (creght.Content, error) {
 	raw, err := readOptionalJSON(path)
 	if err != nil {
@@ -927,15 +937,17 @@ func contentFromDataFile(path string) (creght.Content, error) {
 		return creght.Content{}, fmt.Errorf("--data is required")
 	}
 
-	if isFullContentObject(raw) {
-		var content creght.Content
-		if err := json.Unmarshal(raw, &content); err != nil {
-			return creght.Content{}, fmt.Errorf("parse content JSON: %w", err)
-		}
-		return content, nil
-	}
+	const formatHint = `--data must be a full content object with an object-valued "body" key, e.g. {"slug":"my-post","sort":1,"body":{"title":"..."}}`
 
-	return creght.Content{Body: raw}, nil
+	var content creght.Content
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return creght.Content{}, fmt.Errorf("parse content JSON: %w; %s", err, formatHint)
+	}
+	body := bytes.TrimSpace(content.Body)
+	if len(body) == 0 || body[0] != '{' {
+		return creght.Content{}, fmt.Errorf("%s", formatHint)
+	}
+	return content, nil
 }
 
 func resolveCMSCollectionID(ctx context.Context, client *creght.Client, projectID string, id string, keyOrID string) (string, error) {
@@ -1031,16 +1043,6 @@ func rawObjectHas(raw json.RawMessage, key string) bool {
 	}
 	_, ok := object[key]
 	return ok
-}
-
-func isFullContentObject(raw json.RawMessage) bool {
-	for _, key := range []string{"id", "slug", "content_app_id", "json_schema", "status", "sort", "tags"} {
-		if rawObjectHas(raw, key) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func printJSON(v any) error {
