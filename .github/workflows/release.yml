@@ -34,7 +34,10 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Update npm
-        run: npm install -g npm@latest
+        # Pin npm: npm@latest (12.0.0, published 2026-07-08) has a broken
+        # `npm publish --provenance` path (Cannot find module 'sigstore').
+        # 11.18.0 is the last known-good version that provenance works on.
+        run: npm install -g npm@11.18.0
 
       - name: Check npm package version
         run: |
