@@ -68,10 +68,56 @@ Current API host: %s`, helpAPIHost()),
 		return runLogout(args)
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local site file changes before pushing.", runDiff))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local site file changes to Creght.", runPush))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local site files and sync changes back to Creght.", runSync))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,
+		withLong(`Download a Creght site into a local workspace and record a base snapshot in
+.creght/state.json for safe 3-way sync.
+
+Local paths mirror remote site paths exactly (e.g. page/x.tsx <-> /page/x.tsx);
+Func keys map to backend/func/ (e.g. booking <-> backend/func/booking.ts).
+
+Without a path it merges the whole site (keeps local-only edits, reports
+conflicts). With an optional <path> it pulls just that one file and updates only
+its base state. --force overwrites local with the remote copy.`),
+		withExample(`  creght pull --site_id=<pid>/<sid> --dir=./mysite
+  creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite
+  creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite --force`)))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local site file changes before pushing.", runDiff,
+		withLong(`Show what push would change, comparing three versions: the base snapshot in
+.creght/state.json, current local files, and current remote files.
+
+--json prints a machine-readable plan: {"has_conflicts":bool,"files":[{"path",
+"status","action"}]} where status is local-change | remote-only | conflict |
+no-base. With <path> it prints a line diff (remote vs local) of that one file.`),
+		withExample(`  creght diff --site_id=<pid>/<sid> --dir=./mysite
+  creght diff --site_id=<pid>/<sid> --dir=./mysite --json
+  creght diff page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite`)))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local site file changes to Creght.", runPush,
+		withLong(`Upload local changes, comparing base/local/remote. Files changed only remotely
+are kept; local deletions are skipped unless --delete; files changed both
+locally and remotely report a conflict (inspect with creght cat/diff, then pull
+or overwrite). --force overwrites remote with the local snapshot.
+
+Run push from the workspace root (the directory that contains .creght/), the
+same place pull created .creght/state.json.
+
+push does not publish. Use creght publish to promote changes to the live site.`),
+		withExample(`  creght push --site_id=<pid>/<sid> --dir=./mysite
+  creght push --site_id=<pid>/<sid> --dir=./mysite --delete`)))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local site files and sync changes back to Creght.", runSync,
+		withLong(`Run the safe push check once, then watch the workspace and push changes in
+realtime. sync uploads local->remote only; it does not merge remote edits into
+local files — run creght pull for that.`)))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"cat"}, "cat <path>", "Print one site file's content to stdout (remote by default, or local).", runCat, func(flags *pflag.FlagSet) {
+		addSiteIDFlag(flags)
+		flags.String("dir", ".", "Local Creght project directory.")
+		flags.String("ref", "remote", "Which version to read: remote | local.")
+	},
+		withLong(`Print a single site file's content to stdout without pulling the whole
+workspace. --ref remote (default) reads the live remote file; --ref local reads
+the workspace copy. <path> accepts a remote path (/page/x.tsx) or a
+workspace-relative path (page/x.tsx).`),
+		withExample(`  creght cat page/Index.tsx --site_id=<pid>/<sid>
+  creght cat page/Index.tsx --ref=local --dir=./mysite`)))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
@@ -101,11 +147,23 @@ func helpAPIHost() string {
 	return defaultAPIHost()
 }
 
-func legacyCommand(ctx context.Context, rawArgs []string, path []string, use string, short string, run func(context.Context, []string) error, flags func(*pflag.FlagSet)) *cobra.Command {
-	return legacyCommandPass(ctx, rawArgs, path, use, short, run, flags)
+// cmdOpt customizes a command built by legacyCommand/siteFileCommand, so
+// `creght <cmd> --help` can carry the authoritative usage docs.
+type cmdOpt func(*cobra.Command)
+
+// withLong sets the long description shown by `creght <cmd> --help`.
+func withLong(long string) cmdOpt { return func(c *cobra.Command) { c.Long = strings.TrimSpace(long) } }
+
+// withExample sets the example block shown by `creght <cmd> --help`.
+func withExample(example string) cmdOpt {
+	return func(c *cobra.Command) { c.Example = strings.TrimSpace(example) }
 }
 
-func legacyCommandPass(ctx context.Context, rawArgs []string, passAfterPath []string, use string, short string, run func(context.Context, []string) error, flags func(*pflag.FlagSet)) *cobra.Command {
+func legacyCommand(ctx context.Context, rawArgs []string, path []string, use string, short string, run func(context.Context, []string) error, flags func(*pflag.FlagSet), opts ...cmdOpt) *cobra.Command {
+	return legacyCommandPass(ctx, rawArgs, path, use, short, run, flags, opts...)
+}
+
+func legacyCommandPass(ctx context.Context, rawArgs []string, passAfterPath []string, use string, short string, run func(context.Context, []string) error, flags func(*pflag.FlagSet), opts ...cmdOpt) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
@@ -115,6 +173,9 @@ func legacyCommandPass(ctx context.Context, rawArgs []string, passAfterPath []st
 	}
 	if flags != nil {
 		flags(cmd.Flags())
+	}
+	for _, opt := range opts {
+		opt(cmd)
 	}
 	return cmd
 }
@@ -158,7 +219,7 @@ func siteCommand(ctx context.Context, rawArgs []string, name string, short strin
 	})
 }
 
-func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error) *cobra.Command {
+func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error, opts ...cmdOpt) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
 		flags.String("dir", ".", "Local Creght project directory.")
@@ -171,8 +232,9 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 		}
 		if name == "diff" {
 			flags.Bool("delete", false, "Show remote deletions for files/functions removed locally.")
+			flags.Bool("json", false, "Output the change plan as machine-readable JSON.")
 		}
-	})
+	}, opts...)
 }
 
 func devCommand(ctx context.Context, rawArgs []string) *cobra.Command {
@@ -201,7 +263,16 @@ func uploadCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		flags.String("mimetype", "", "File MIME type.")
 		flags.String("cache-control", "", "Cache-Control metadata for uploaded object.")
 		flags.Bool("json", false, "Print upload metadata as JSON.")
-	})
+	},
+		withLong(`Upload a build-time local file (downloaded stock image, generated favicon,
+mockup, texture, exported illustration) as a Creght-hosted asset. With --json
+the command prints {"file_url":"<cdn-url>"}.
+
+For assets created inside a Func at runtime (e.g. AI-generated images), use
+ctx.assets.upload({filename, mimeType, base64}) in the Func instead; persist the
+returned CDN URL/metadata, never base64 payloads.`),
+		withExample(`  creght upload --site_id=<pid>/<sid> --file=./image.png
+  creght upload --site_id=<pid>/<sid> --file=./image.png --json`))
 }
 
 func cmsCommand(ctx context.Context, rawArgs []string) *cobra.Command {
@@ -232,6 +303,17 @@ func contentCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "content",
 		Short: "Manage CMS content entries.",
+		Long: `Manage CMS content entries.
+
+For create/update, --data points at a full content object whose business fields
+are wrapped under a "body" key (top-level slug/sort are optional; matching flags
+win). Bare body files are rejected with a format error. Example content.json:
+
+  {"slug":"post-1","sort":1,"body":{"title":"Hi","tags":["skill"]}}
+
+Detail commands print JSON to stdout; use --out=<file> to save. content update
+exits non-zero with "not updated: <reason>" when no field actually changed —
+treat that as a signal to check the payload, not as success.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runContent(ctx, originalArgsAfter(rawArgs, []string{"content"}))
 		},
