@@ -121,25 +121,21 @@ The command writes a file-based workspace:
 ```text
 mysite/
   AGENTS.md
-  frontend/
-    page/...
-    component/...
-    talizen.config.ts
+  page/...
+  component/...
+  talizen.config.ts
   backend/
     func/
       booking.ts
       profile/settings.ts
 ```
 
-Remote site files map to the local workspace with an asymmetric rule:
+Local paths mirror remote site paths exactly: `page/Index.tsx` maps to
+`/page/Index.tsx` and `backend/func/booking.ts` maps to
+`/backend/func/booking.ts`.
 
-- `frontend/<p>` <-> remote `/<p>`: the `frontend/` root is stripped, so
-  `frontend/page/Index.tsx` maps to `/page/Index.tsx`.
-- `backend/<p>` <-> remote `/backend/<p>`: the `backend/` prefix is kept, so
-  `backend/func/booking.ts` maps to `/backend/func/booking.ts`.
-
-Everything under `frontend/` and `backend/` is an ordinary site file. Func
-backend code is simply the set of site files under `backend/func/`; for example
+Every file in the workspace is an ordinary site file. Func backend code is
+simply the set of site files under `backend/func/`; for example
 `backend/func/booking.ts` is the Func with key `booking`, and
 `backend/func/profile/settings.ts` is `profile/settings`.
 
@@ -149,9 +145,9 @@ Creght projects pulled by the CLI usually do not have their own `package.json`
 or `node_modules`. The local preview plugin therefore uses Vite only for local
 file serving and TSX transpilation; third-party packages continue to resolve
 through the Creght import map, matching the Web editor preview model. In
-`creght dev`, the CLI serves the `frontend/` directory when present, loads the
-platform import map from server system info, and passes it to the Vite plugin;
-the plugin's local map is only a fallback.
+`creght dev`, the CLI serves the workspace directory, loads the platform import
+map from server system info, and passes it to the Vite plugin; the plugin's
+local map is only a fallback.
 
 Install Vite in the local project folder:
 
@@ -205,14 +201,11 @@ For local development:
 CREGHT_API_HOST=http://localhost:8433 creght push --site_id=<project_id>/<site_id> --dir=./mysite
 ```
 
-The CLI scans the local workspace and diffs every file under `frontend/` and
-`backend/` against the remote site files:
+The CLI scans the local workspace and diffs every file against the remote site
+files. Local paths map to remote paths as-is, so `page/Index.tsx` becomes
+`/page/Index.tsx` and `backend/func/**/*.ts` becomes `/backend/func/**/*.ts`.
 
-- `frontend/**` is synced to Creght site files with the `frontend/` root stripped.
-- `backend/**` is synced to Creght site files keeping the `backend/` prefix, so
-  `backend/func/**/*.ts` becomes `/backend/func/**/*.ts`.
-
-Both trees flow through the same site file mechanism (`file_list` /
+All files flow through the same site file mechanism (`file_list` /
 `site_action`). Func code is not a separate resource; creating, editing,
 renaming, or deleting a file under `backend/func/` creates, updates, renames, or
 deletes the corresponding site file, and Func code is versioned and published
@@ -233,10 +226,10 @@ CREGHT_API_HOST=http://localhost:8433 creght sync --site_id=<project_id>/<site_i
 ```
 
 `sync` first pushes the current local snapshot, then keeps running and
-automatically listens for local file changes. When any file under `frontend/`
-or `backend/` (including Func code under `backend/func/`) changes locally, the
-CLI updates the corresponding remote site file in realtime. The command also
-prints the remote preview URL when available.
+automatically listens for local file changes. When any workspace file
+(including Func code under `backend/func/`) changes locally, the CLI updates
+the corresponding remote site file in realtime. The command also prints the
+remote preview URL when available.
 
 ## Local Web Editor Bidirectional Sync
 
@@ -575,7 +568,7 @@ Command meanings:
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
-- `pull`: Download site files (both `frontend/` and `backend/`, including Func code) into a local workspace.
+- `pull`: Download site files (including Func code under `backend/func/`) into a local workspace.
 - `push`: Push the current local workspace snapshot to the remote site/project.
 - `sync`: Watch mode; push the current snapshot, then keep listening for local changes.
 - `dev`: Bidirectionally sync local files with cloud realtime files and the online Web editor.

@@ -9,64 +9,6 @@ import (
 	"unicode/utf8"
 )
 
-const (
-	workspaceFrontendDir = "frontend"
-	workspaceBackendDir  = "backend"
-)
-
-func frontendRoot(root string) string {
-	return filepath.Join(root, workspaceFrontendDir)
-}
-
-func backendRoot(root string) string {
-	return filepath.Join(root, workspaceBackendDir)
-}
-
-func hasFrontendLayout(root string) bool {
-	info, err := os.Stat(frontendRoot(root))
-	return err == nil && info.IsDir()
-}
-
-func siteSyncRoot(root string) string {
-	if hasFrontendLayout(root) {
-		return frontendRoot(root)
-	}
-	return root
-}
-
-// workspaceSyncRoots returns the local directories whose files are synced as
-// ordinary site files. With the standard layout the frontend and backend trees
-// are separate top-level directories; the flat legacy layout syncs the whole
-// workspace root.
-func workspaceSyncRoots(root string) []string {
-	if hasFrontendLayout(root) {
-		return []string{frontendRoot(root), backendRoot(root)}
-	}
-	return []string{root}
-}
-
-// isWorkspaceSyncablePath reports whether a local path is within one of the
-// workspace sync roots and therefore mirrors a remote site file.
-func isWorkspaceSyncablePath(root string, path string) bool {
-	for _, syncRoot := range workspaceSyncRoots(root) {
-		if isPathInside(syncRoot, path) {
-			return true
-		}
-	}
-	return false
-}
-
-// isBackendRemotePath reports whether a remote site path lives under the
-// /backend/ prefix (for example /backend/func/booking.ts).
-func isBackendRemotePath(remotePath string) bool {
-	clean := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(remotePath), "/")))
-	if clean == "." || clean == "" {
-		return false
-	}
-	parts := strings.SplitN(clean, "/", 2)
-	return parts[0] == workspaceBackendDir
-}
-
 func remotePathToLocal(root string, remotePath string) (string, error) {
 	remotePath = strings.TrimSpace(remotePath)
 	if remotePath == "" || remotePath == "/" {
@@ -93,42 +35,51 @@ func localPathToRemote(root string, localPath string) (string, error) {
 	return "/" + filepath.ToSlash(rel), nil
 }
 
-// remotePathToWorkspaceLocal maps a remote site path to its local workspace
-// path. Backend files keep their /backend/ prefix (remote /backend/func/x.ts ->
-// local backend/func/x.ts) while all other files are written under frontend/
-// (remote /page/x.tsx -> local frontend/page/x.tsx).
-func remotePathToWorkspaceLocal(root string, remotePath string) (string, error) {
-	if isBackendRemotePath(remotePath) {
-		return remotePathToLocal(root, remotePath)
-	}
-	return remotePathToLocal(frontendRoot(root), remotePath)
-}
-
-// localWorkspacePathToRemote is the inverse of remotePathToWorkspaceLocal. Files
-// under backend/ keep that prefix in the remote path; files under frontend/ (or
-// the flat workspace root) have that root stripped.
-func localWorkspacePathToRemote(root string, localPath string) (string, error) {
-	if isWorkspaceBackendPath(root, localPath) {
-		return localPathToRemote(root, localPath)
-	}
-	return localPathToRemote(siteSyncRoot(root), localPath)
-}
-
-func isWorkspaceBackendPath(root string, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return false
-	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	return len(parts) > 0 && parts[0] == workspaceBackendDir
-}
-
 func isPathInside(root string, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+}
+
+// walkWorkspaceFiles walks every syncable local file under root, calling fn
+// with the local path. Local paths mirror remote site paths exactly
+// (page/Index.tsx <-> /page/Index.tsx, backend/func/booking.ts <->
+// /backend/func/booking.ts).
+func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
+	if err := rejectLegacyFrontendLayout(root); err != nil {
+		return err
+	}
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil
+	}
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if shouldSkipLocalPath(root, path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		return fn(path)
+	})
+}
+
+// rejectLegacyFrontendLayout errors on workspaces pulled by older CLI versions
+// that nested site files under frontend/; syncing those paths as-is would
+// create bogus remote /frontend/* files and delete the real remote files.
+func rejectLegacyFrontendLayout(root string) error {
+	info, err := os.Stat(filepath.Join(root, "frontend"))
+	if err == nil && info.IsDir() {
+		return fmt.Errorf("workspace %s uses the legacy frontend/ layout; local paths now mirror remote site paths exactly. Move files out of frontend/ to the workspace root (frontend/page/Index.tsx -> page/Index.tsx) or re-pull into a fresh directory", root)
+	}
+	return nil
 }
 
 func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
@@ -141,7 +92,7 @@ func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
 			continue
 		}
 
-		localPath, err := remotePathToWorkspaceLocal(root, file.Path)
+		localPath, err := remotePathToLocal(root, file.Path)
 		if err != nil {
 			return err
 		}
@@ -204,13 +155,11 @@ Editor URL: %s
 
 Workspace layout:
 
-- frontend/ contains Creght site files such as page/, component/, and
-  talizen.config.ts. These map to remote site paths with the frontend/ root
-  stripped (frontend/page/x.tsx <-> /page/x.tsx).
-- backend/ contains site files that keep their backend/ prefix in the remote
-  path (backend/func/booking.ts <-> /backend/func/booking.ts). Func backend
-  code lives under backend/func/; for example backend/func/booking.ts is the
-  Func with key booking and backend/func/profile/settings.ts is profile/settings.
+Local paths mirror remote site paths exactly: page/Index.tsx is the remote
+/page/Index.tsx, talizen.config.ts is /talizen.config.ts, and so on. Func
+backend code lives under backend/func/; for example backend/func/booking.ts is
+the Func with key booking and backend/func/profile/settings.ts is
+profile/settings.
 
 Func code is just ordinary site source under backend/func/. It is synced,
 versioned, and published together with the site through the normal pull, push,

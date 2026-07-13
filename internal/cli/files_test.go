@@ -43,56 +43,41 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 
 func TestWorkspacePathMapping(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 
-	localPath, err := remotePathToWorkspaceLocal(dir, "/page/Index.tsx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if localPath != filepath.Join(dir, "frontend", "page", "Index.tsx") {
-		t.Fatalf("localPath = %q", localPath)
-	}
+	// Local paths mirror remote site paths exactly.
+	for remote, local := range map[string]string{
+		"/page/Index.tsx":                   filepath.Join(dir, "page", "Index.tsx"),
+		"/talizen.config.ts":                filepath.Join(dir, "talizen.config.ts"),
+		"/backend/func/booking.ts":          filepath.Join(dir, "backend", "func", "booking.ts"),
+		"/backend/func/profile/settings.ts": filepath.Join(dir, "backend", "func", "profile", "settings.ts"),
+	} {
+		localPath, err := remotePathToLocal(dir, remote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if localPath != local {
+			t.Fatalf("localPath for %s = %q, want %q", remote, localPath, local)
+		}
 
-	remotePath, err := localWorkspacePathToRemote(dir, localPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if remotePath != "/page/Index.tsx" {
-		t.Fatalf("remotePath = %q", remotePath)
+		remotePath, err := localPathToRemote(dir, localPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if remotePath != remote {
+			t.Fatalf("remotePath = %q, want %q", remotePath, remote)
+		}
 	}
 }
 
-func TestBackendPathMapping(t *testing.T) {
+func TestWalkWorkspaceFilesRejectsLegacyFrontendLayout(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "frontend", "page"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Backend files keep their /backend/ prefix on both sides of the mapping.
-	localPath, err := remotePathToWorkspaceLocal(dir, "/backend/func/booking.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if localPath != filepath.Join(dir, "backend", "func", "booking.ts") {
-		t.Fatalf("localPath = %q", localPath)
-	}
-
-	remotePath, err := localWorkspacePathToRemote(dir, localPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if remotePath != "/backend/func/booking.ts" {
-		t.Fatalf("remotePath = %q", remotePath)
-	}
-
-	nested, err := remotePathToWorkspaceLocal(dir, "/backend/func/profile/settings.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nested != filepath.Join(dir, "backend", "func", "profile", "settings.ts") {
-		t.Fatalf("nested localPath = %q", nested)
+	err := walkWorkspaceFiles(dir, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "legacy frontend/ layout") {
+		t.Fatalf("err = %v, want legacy layout error", err)
 	}
 }
 

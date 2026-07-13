@@ -99,7 +99,7 @@ func runDev(ctx context.Context, args []string) error {
 
 	if !*noPreview {
 		preview, err := startVitePreview(ctx, vitePreviewOptions{
-			Dir:       siteSyncRoot(dev.dir),
+			Dir:       dev.dir,
 			APIHost:   dev.apiHost,
 			ProjectID: projectID,
 			Token:     dev.token,
@@ -623,45 +623,24 @@ func (d *DevSyncer) mirrorRemoteToLocal(ctx context.Context) error {
 		}
 	}
 
-	for _, syncRoot := range workspaceSyncRoots(d.dir) {
-		if _, err := os.Stat(syncRoot); os.IsNotExist(err) {
-			continue
-		}
-		err := filepath.WalkDir(syncRoot, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if shouldSkipLocalPath(syncRoot, path) {
-				if entry.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			remotePath, err := localWorkspacePathToRemote(d.dir, path)
-			if err != nil {
-				return err
-			}
-			if _, ok := remotePaths[remotePath]; ok {
-				return nil
-			}
-			d.markRemoteApply(path)
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove local deleted remote file %s: %w", remotePath, err)
-			}
-			return nil
-		})
+	return walkWorkspaceFiles(d.dir, func(path string) error {
+		remotePath, err := localPathToRemote(d.dir, path)
 		if err != nil {
 			return err
 		}
-	}
-	return nil
+		if _, ok := remotePaths[remotePath]; ok {
+			return nil
+		}
+		d.markRemoteApply(path)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove local deleted remote file %s: %w", remotePath, err)
+		}
+		return nil
+	})
 }
 
 func (d *DevSyncer) writeRemoteFileToLocal(remotePath string, body string) error {
-	localPath, err := remotePathToWorkspaceLocal(d.dir, remotePath)
+	localPath, err := remotePathToLocal(d.dir, remotePath)
 	if err != nil {
 		return err
 	}

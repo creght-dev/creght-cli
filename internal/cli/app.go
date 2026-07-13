@@ -223,12 +223,11 @@ func runProjectCreate(ctx context.Context, args []string) error {
 }
 
 func runPull(ctx context.Context, args []string) error {
-	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
 	force := fs.Bool("force", false, "overwrite local files with the remote workspace")
-	err := fs.Parse(flagArgs)
+	err := fs.Parse(args)
 	if err != nil {
 		return err
 	}
@@ -236,13 +235,6 @@ func runPull(ctx context.Context, args []string) error {
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
 		return err
-	}
-
-	if len(positionals) > 1 {
-		return fmt.Errorf("pull accepts at most one <path> argument")
-	}
-	if len(positionals) == 1 {
-		return pullOneFile(ctx, projectID, realSiteID, *dir, positionals[0], *force)
 	}
 
 	client, cfg, err := clientFromConfig()
@@ -329,7 +321,7 @@ func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapsh
 }
 
 func writePulledFile(root string, entry snapshotEntry) error {
-	localPath, err := remotePathToWorkspaceLocal(root, entry.Path)
+	localPath, err := remotePathToLocal(root, entry.Path)
 	if err != nil {
 		return err
 	}
@@ -343,7 +335,7 @@ func writePulledFile(root string, entry snapshotEntry) error {
 }
 
 func deletePulledFile(root string, remotePath string) error {
-	localPath, err := remotePathToWorkspaceLocal(root, remotePath)
+	localPath, err := remotePathToLocal(root, remotePath)
 	if err != nil {
 		return err
 	}
@@ -428,13 +420,11 @@ func runPush(ctx context.Context, args []string) error {
 }
 
 func runDiff(ctx context.Context, args []string) error {
-	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("diff", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
 	allowDelete := fs.Bool("delete", false, "show remote deletions for files/functions removed locally")
-	jsonOut := fs.Bool("json", false, "output the change plan as JSON")
-	err := fs.Parse(flagArgs)
+	err := fs.Parse(args)
 	if err != nil {
 		return err
 	}
@@ -442,13 +432,6 @@ func runDiff(ctx context.Context, args []string) error {
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
 		return err
-	}
-
-	if len(positionals) > 1 {
-		return fmt.Errorf("diff accepts at most one <path> argument")
-	}
-	if len(positionals) == 1 {
-		return diffOneFile(ctx, projectID, realSiteID, *dir, positionals[0])
 	}
 
 	client, _, err := clientFromConfig()
@@ -464,9 +447,6 @@ func runDiff(ctx context.Context, args []string) error {
 	plan, err := syncer.BuildPlan(ctx, *allowDelete)
 	if err != nil {
 		return err
-	}
-	if *jsonOut {
-		return printPlanJSON(plan)
 	}
 	printSyncPlan(plan, true)
 	if plan.hasConflicts() {

@@ -352,42 +352,24 @@ func (s *Syncer) saveLocalBaseState() error {
 func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 	var actions []localFileAction
 	localPaths := map[string]struct{}{}
-	for _, syncRoot := range workspaceSyncRoots(s.dir) {
-		if _, err := os.Stat(syncRoot); os.IsNotExist(err) {
-			continue
-		}
-		err := filepath.WalkDir(syncRoot, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if shouldSkipLocalPath(syncRoot, path) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-
-			remotePath, err := localWorkspacePathToRemote(s.dir, path)
-			if err != nil {
-				return err
-			}
-			localPaths[remotePath] = struct{}{}
-
-			action, changed, err := s.localFileAction(path)
-			if err != nil {
-				return err
-			}
-			if changed {
-				actions = append(actions, action)
-			}
-			return nil
-		})
+	err := walkWorkspaceFiles(s.dir, func(path string) error {
+		remotePath, err := localPathToRemote(s.dir, path)
 		if err != nil {
-			return nil, err
+			return err
 		}
+		localPaths[remotePath] = struct{}{}
+
+		action, changed, err := s.localFileAction(path)
+		if err != nil {
+			return err
+		}
+		if changed {
+			actions = append(actions, action)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -425,12 +407,12 @@ func (s *Syncer) watchDirs(watcher *fsnotify.Watcher) error {
 }
 
 func (s *Syncer) handleEvent(ctx context.Context, event fsnotify.Event) error {
-	if !isWorkspaceSyncablePath(s.dir, event.Name) {
+	if !isPathInside(s.dir, event.Name) {
 		return nil
 	}
 
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
-		remotePath, err := localWorkspacePathToRemote(s.dir, event.Name)
+		remotePath, err := localPathToRemote(s.dir, event.Name)
 		if err != nil {
 			return err
 		}
@@ -476,7 +458,7 @@ func (s *Syncer) upsertLocalFile(ctx context.Context, localPath string) error {
 }
 
 func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error) {
-	remotePath, err := localWorkspacePathToRemote(s.dir, localPath)
+	remotePath, err := localPathToRemote(s.dir, localPath)
 	if err != nil {
 		return localFileAction{}, false, err
 	}

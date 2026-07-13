@@ -98,35 +98,6 @@ func saveWorkspaceState(root string, siteID string, files map[string]snapshotEnt
 	return nil
 }
 
-// putStateFileEntry updates the base state for a single file (used by
-// single-file pull) without rewriting the whole snapshot.
-func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
-	state, hasState, err := loadWorkspaceState(root)
-	if err != nil {
-		return err
-	}
-	if !hasState || state.Files == nil {
-		state.Files = map[string]stateEntry{}
-	}
-	if strings.TrimSpace(state.SiteID) == "" {
-		state.SiteID = siteID
-	}
-	state.Files[entry.Path] = stateEntry{Hash: entry.Hash, Readonly: entry.Readonly}
-	state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
-
-	if err := os.MkdirAll(filepath.Dir(statePath(root)), 0o755); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
-	}
-	body, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write state: %w", err)
-	}
-	return nil
-}
-
 func remoteFileSnapshot(files []creght.File) map[string]snapshotEntry {
 	out := map[string]snapshotEntry{}
 	for _, file := range files {
@@ -150,44 +121,27 @@ func remoteFileSnapshot(files []creght.File) map[string]snapshotEntry {
 
 func localFileSnapshot(root string) (map[string]snapshotEntry, error) {
 	out := map[string]snapshotEntry{}
-	for _, syncRoot := range workspaceSyncRoots(root) {
-		if _, err := os.Stat(syncRoot); os.IsNotExist(err) {
-			continue
-		}
-		err := filepath.WalkDir(syncRoot, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if shouldSkipLocalPath(syncRoot, path) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if !isUTF8FileBody(body) {
-				return nil
-			}
-			remotePath, err := localWorkspacePathToRemote(root, path)
-			if err != nil {
-				return err
-			}
-			hash, err := qetagHash(body)
-			if err != nil {
-				return err
-			}
-			out[remotePath] = snapshotEntry{Path: remotePath, Hash: hash, Body: string(body)}
-			return nil
-		})
+	err := walkWorkspaceFiles(root, func(path string) error {
+		body, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return err
 		}
+		if !isUTF8FileBody(body) {
+			return nil
+		}
+		remotePath, err := localPathToRemote(root, path)
+		if err != nil {
+			return err
+		}
+		hash, err := qetagHash(body)
+		if err != nil {
+			return err
+		}
+		out[remotePath] = snapshotEntry{Path: remotePath, Hash: hash, Body: string(body)}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

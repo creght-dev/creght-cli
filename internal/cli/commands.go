@@ -48,8 +48,8 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Long: fmt.Sprintf(`Creght CLI authenticates with Creght, lists projects and sites,
-pulls remote frontend and Func files into a local workspace, pushes local
-changes back to Creght, watches local files for sync, opens previews, and
+pulls remote site files (including Func code) into a local workspace, pushes
+local changes back to Creght, watches local files for sync, opens previews, and
 publishes sites.
 
 Current API host: %s`, helpAPIHost()),
@@ -68,10 +68,10 @@ Current API host: %s`, helpAPIHost()),
 		return runLogout(args)
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download frontend and Func files into a local workspace.", runPull))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local frontend and Func changes before pushing.", runDiff))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local frontend and Func changes to Creght.", runPush))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local frontend and Func files and sync changes back to Creght.", runSync))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local site file changes before pushing.", runDiff))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local site file changes to Creght.", runPush))
+	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local site files and sync changes back to Creght.", runSync))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
