@@ -92,6 +92,47 @@ func (c *Client) do(ctx context.Context, method string, path string, query url.V
 	return nil
 }
 
+func (c *Client) doRaw(ctx context.Context, method string, path string, query url.Values, body any) ([]byte, int, error) {
+	var reader io.Reader
+	if body != nil {
+		bs, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("marshal request: %w", err)
+		}
+		reader = bytes.NewReader(bs)
+	}
+
+	u := c.baseURL + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u, reader)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	bs, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	return bs, resp.StatusCode, nil
+}
+
 type CLIAuthSession struct {
 	Code      string `json:"code"`
 	VerifyURL string `json:"verify_url"`
@@ -243,11 +284,8 @@ type ProjectTableRecord struct {
 }
 
 type RunFuncResponse struct {
-	OK      bool            `json:"ok"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Logs    json.RawMessage `json:"logs,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Effects json.RawMessage `json:"effects,omitempty"`
+	StatusCode int
+	Body       json.RawMessage
 }
 
 type ListResponse[T any] struct {
@@ -584,14 +622,19 @@ func (c *Client) DeleteProjectTableRecord(ctx context.Context, projectID string,
 // note on GetProjectTableList): it is not part of the /api/u talizen-compat
 // group, so use /api/p here.
 func (c *Client) RunProjectFunc(ctx context.Context, projectID string, body map[string]any) (RunFuncResponse, error) {
-	var ret RunFuncResponse
 	path := fmt.Sprintf("/api/p/project/%s/func/run", url.PathEscape(projectID))
-	err := c.do(ctx, http.MethodPost, path, nil, body, &ret)
+	bs, statusCode, err := c.doRaw(ctx, http.MethodPost, path, nil, body)
 	if err != nil {
 		return RunFuncResponse{}, err
 	}
+	if len(bs) == 0 {
+		bs = []byte("null")
+	}
+	if !json.Valid(bs) {
+		return RunFuncResponse{}, fmt.Errorf("parse response: invalid JSON")
+	}
 
-	return ret, nil
+	return RunFuncResponse{StatusCode: statusCode, Body: json.RawMessage(bs)}, nil
 }
 
 func (c *Client) PreUploadSiteAsset(ctx context.Context, projectID string, siteID string, req AssetPreUploadRequest) (AssetPreUploadResponse, error) {

@@ -480,6 +480,10 @@ to self-test a Func method with sample input:
 creght func run --site_id=<project_id>/<site_id> --key=booking.create --input=./input.json
 ```
 
+The output matches the Func HTTP response protocol: successful runs print
+`{"result": ...}` and thrown Func errors print `{"error": "..."}`. There is no
+top-level `ok` execution wrapper.
+
 There are no `creght func list/get/create/update/delete` commands. Manage Func
 code by editing `backend/func` files and syncing them with pull/push/sync/dev
 like any other site file; `func run` only runs sample input.

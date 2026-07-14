@@ -87,19 +87,27 @@ func TestRunFuncRunSendsInvokePayload(t *testing.T) {
 			t.Fatalf("decode body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"result":{"ok":true}}`))
+		_, _ = w.Write([]byte(`{"result":{"id":"booking-1"}}`))
 	}))
 	defer server.Close()
 	t.Setenv("CREGHT_API_HOST", server.URL)
 
-	err := runFuncRun(context.Background(), []string{
-		"--site_id=project-1/site-1",
-		"--key=booking.create",
-		"--input=" + inputPath,
-		"--timeout_ms=3000",
+	output := captureStdout(t, func() {
+		err := runFuncRun(context.Background(), []string{
+			"--site_id=project-1/site-1",
+			"--key=booking.create",
+			"--input=" + inputPath,
+			"--timeout_ms=3000",
+		})
+		if err != nil {
+			t.Fatalf("runFuncRun: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatalf("runFuncRun: %v", err)
+	if strings.Contains(output, `"ok"`) {
+		t.Fatalf("func run output contains old ok wrapper: %q", output)
+	}
+	if !strings.Contains(output, `"result"`) || !strings.Contains(output, `"booking-1"`) {
+		t.Fatalf("func run output = %q, want result JSON", output)
 	}
 	if gotBody["key"] != "booking.create" {
 		t.Fatalf("key = %#v", gotBody["key"])
@@ -113,6 +121,38 @@ func TestRunFuncRunSendsInvokePayload(t *testing.T) {
 	input := gotBody["input"].(map[string]any)
 	if input["date"] != "2026-07-05" {
 		t.Fatalf("input = %#v", input)
+	}
+}
+
+func TestRunFuncRunPrintsFuncErrorProtocol(t *testing.T) {
+	setupTestConfig(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/p/project/project-1/func/run" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"date is required"}`))
+	}))
+	defer server.Close()
+	t.Setenv("CREGHT_API_HOST", server.URL)
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runFuncRun(context.Background(), []string{
+			"--site_id=project-1/site-1",
+			"--key=booking.create",
+		})
+	})
+	if err == nil {
+		t.Fatal("runFuncRun error = nil, want HTTP error")
+	}
+	if strings.Contains(output, `"ok"`) {
+		t.Fatalf("func run error output contains old ok wrapper: %q", output)
+	}
+	if !strings.Contains(output, `"error"`) || !strings.Contains(output, `"date is required"`) {
+		t.Fatalf("func run error output = %q, want error JSON", output)
 	}
 }
 

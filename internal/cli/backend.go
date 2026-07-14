@@ -473,7 +473,8 @@ Notes:
   creght pull/push/sync/dev. This command is only for running sample input.
   Func keys are extensionless project paths such as booking or profile/settings.
   Write ESM exports with (input, ctx): export function create(input, ctx) { ... }.
-  Use talizen/func in page code to call invoke("booking.create", input).`)
+  Use talizen/func in page code to call invoke("booking.create", input).
+  Output matches Func HTTP JSON: {"result": ...} on success, {"error": "..."} on error.`)
 }
 
 func runFuncRun(ctx context.Context, args []string) error {
@@ -523,7 +524,13 @@ func runFuncRun(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return printJSON(res)
+	if err := printJSON(res.Body); err != nil {
+		return err
+	}
+	if res.StatusCode >= 400 {
+		return fmt.Errorf("func returned HTTP %d", res.StatusCode)
+	}
+	return nil
 }
 
 func tableFromInputs(schemaPath string, key string, newKey string, name string, desc string) (creght.ProjectTable, error) {
