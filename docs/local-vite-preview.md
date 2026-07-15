@@ -4,8 +4,8 @@ This document describes how to run a pulled Creght project locally with Vite.
 
 The local Vite preview is a development helper. It is not the canonical Creght
 renderer and does not implement full production SSR. The canonical preview is
-still the remote Creght preview URL printed by `creght pull`, `creght sync`,
-or `creght preview`.
+still the remote Creght preview URL printed by `creght pull` or
+`creght preview`.
 
 ## Why Import Map Instead Of Vite Bundling
 
@@ -163,8 +163,8 @@ This preview intentionally does not implement the full render service:
 - no production Tailwind build pipeline
 - no remote file sync by itself
 
-Use it for fast local visual checks. Use `creght sync` or `creght preview` for
-the canonical remote preview that matches Creght production behavior.
+Use it for fast local visual checks. Use `creght preview` for the canonical
+remote preview that matches Creght production behavior.
 
 ## Minimal Workflow
 

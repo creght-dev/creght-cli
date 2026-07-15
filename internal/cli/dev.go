@@ -451,6 +451,105 @@ func (d *DevSyncer) Run(ctx context.Context) error {
 	}
 }
 
+// watchDirs / handleEvent / upsertLocalFile / deleteRemotePath drive the
+// local->remote half of dev's bidirectional sync (last write wins).
+func (s *Syncer) watchDirs(watcher *fsnotify.Watcher) error {
+	return filepath.WalkDir(s.dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if shouldSkipLocalPath(s.dir, path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+
+		return watcher.Add(path)
+	})
+}
+
+func (s *Syncer) handleEvent(ctx context.Context, event fsnotify.Event) error {
+	if !isPathInside(s.dir, event.Name) {
+		return nil
+	}
+
+	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+		remotePath, err := localPathToRemote(s.dir, event.Name)
+		if err != nil {
+			return err
+		}
+
+		return s.deleteRemotePath(ctx, remotePath)
+	}
+	if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+		info, err := os.Stat(event.Name)
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		return s.upsertLocalFile(ctx, event.Name)
+	}
+
+	return nil
+}
+
+func (s *Syncer) upsertLocalFile(ctx context.Context, localPath string) error {
+	action, changed, err := s.localFileAction(localPath)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+
+	_, err = s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, []creght.SiteActionChange{action.action})
+	if err != nil {
+		return err
+	}
+
+	err = s.refreshRemote(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.saveLocalBaseState(); err != nil {
+		return err
+	}
+
+	fmt.Printf("synced %s\n", action.remotePath)
+	return nil
+}
+
+func (s *Syncer) deleteRemotePath(ctx context.Context, remotePath string) error {
+	s.mu.Lock()
+	remote, exist := s.remoteByPath[remotePath]
+	s.mu.Unlock()
+	if !exist || remote.Readonly {
+		return nil
+	}
+
+	_, err := s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, []creght.SiteActionChange{
+		deleteFileAction(remotePath).action,
+	})
+	if err != nil {
+		return err
+	}
+
+	err = s.refreshRemote(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.saveLocalBaseState(); err != nil {
+		return err
+	}
+
+	fmt.Printf("deleted %s\n", remotePath)
+	return nil
+}
+
 func (d *DevSyncer) runRemoteWatcher(ctx context.Context) {
 	for {
 		select {

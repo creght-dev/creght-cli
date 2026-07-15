@@ -13,6 +13,7 @@ import (
 
 const stateDirName = ".creght"
 const stateFileName = "state.json"
+const baseDirName = "base"
 
 type workspaceState struct {
 	SiteID    string                `json:"site_id"`
@@ -48,13 +49,85 @@ type planConflict struct {
 }
 
 type pullEntryPlan struct {
-	Writes    []snapshotEntry
-	Deletes   []string
-	Conflicts []planConflict
+	Writes []snapshotEntry
+	// CleanMerges are files changed on both sides whose edits do not overlap;
+	// Body holds the auto-merged content.
+	CleanMerges []snapshotEntry
+	// ConflictWrites are files changed on both sides with overlapping edits;
+	// Body holds the content with conflict markers.
+	ConflictWrites []snapshotEntry
+	Deletes        []string
+	Conflicts      []planConflict
 }
 
 func statePath(root string) string {
 	return filepath.Join(root, stateDirName, stateFileName)
+}
+
+func baseObjectPath(root string, hash string) string {
+	return filepath.Join(root, stateDirName, baseDirName, hash)
+}
+
+// writeBaseObjects stores file bodies under .creght/base/<hash> so later
+// pulls/pushes can three-way merge against the recorded base content. Entries
+// whose Body does not match their Hash (e.g. hash-only entries carried over
+// from a previous state) are skipped; their blob is either already stored or
+// simply unavailable.
+func writeBaseObjects(root string, files map[string]snapshotEntry) error {
+	for _, file := range files {
+		if file.Hash == "" {
+			continue
+		}
+		path := baseObjectPath(root, file.Hash)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+		hash, err := qetagHash([]byte(file.Body))
+		if err != nil || hash != file.Hash {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create base dir: %w", err)
+		}
+		if err := os.WriteFile(path, []byte(file.Body), 0o644); err != nil {
+			return fmt.Errorf("write base object %s: %w", file.Hash, err)
+		}
+	}
+	return nil
+}
+
+// readBaseObject returns the stored base content for a hash, if present.
+// Workspaces pulled by older CLI versions have no base objects; callers fall
+// back to hash-only conflict detection.
+func readBaseObject(root string, hash string) (string, bool) {
+	if hash == "" {
+		return "", false
+	}
+	body, err := os.ReadFile(baseObjectPath(root, hash))
+	if err != nil {
+		return "", false
+	}
+	return string(body), true
+}
+
+// gcBaseObjects removes base objects no longer referenced by the state.
+func gcBaseObjects(root string, files map[string]stateEntry) {
+	referenced := map[string]struct{}{}
+	for _, entry := range files {
+		referenced[entry.Hash] = struct{}{}
+	}
+	entries, err := os.ReadDir(filepath.Join(root, stateDirName, baseDirName))
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, ok := referenced[entry.Name()]; !ok {
+			_ = os.Remove(baseObjectPath(root, entry.Name()))
+		}
+	}
 }
 
 func loadWorkspaceState(root string) (workspaceState, bool, error) {
@@ -153,11 +226,15 @@ func saveWorkspaceState(root string, siteID string, files map[string]snapshotEnt
 	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
+	if err := writeBaseObjects(root, files); err != nil {
+		return err
+	}
+	gcBaseObjects(root, state.Files)
 	return nil
 }
 
 // putStateFileEntry updates the base state for a single file (used by
-// single-file pull) without rewriting the whole snapshot.
+// single-file pull/push) without rewriting the whole snapshot.
 func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
 	state, hasState, err := loadWorkspaceState(root)
 	if err != nil {
@@ -182,7 +259,7 @@ func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
 	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
-	return nil
+	return writeBaseObjects(root, map[string]snapshotEntry{entry.Path: entry})
 }
 
 func remoteFileSnapshot(files []creght.File) map[string]snapshotEntry {
@@ -259,6 +336,10 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 		if !hasState || !baseOK {
 			switch {
 			case localOK && !remoteOK:
+				if hasConflictMarkers(localEntry.Body) {
+					conflicts = append(conflicts, markerConflict(path))
+					continue
+				}
 				actions = append(actions, createFileAction(path, localEntry.Body))
 			case localOK && remoteOK && localEntry.Hash != remoteEntry.Hash:
 				noBaseRemoteDiffs = append(noBaseRemoteDiffs, path)
@@ -288,6 +369,8 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 				} else {
 					skippedDeletes = append(skippedDeletes, path)
 				}
+			} else if hasConflictMarkers(localEntry.Body) {
+				conflicts = append(conflicts, markerConflict(path))
 			} else if remoteOK {
 				actions = append(actions, updateFileAction(remoteEntry, localEntry.Body))
 			} else {
@@ -300,7 +383,16 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 	return actions, conflicts, skippedDeletes, remoteOnlyUpdates, noBaseRemoteDiffs
 }
 
-func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, local map[string]snapshotEntry, remote map[string]snapshotEntry) pullEntryPlan {
+// markerConflict blocks a file whose local copy still contains conflict
+// markers from a previous pull; pushing those would publish broken code.
+func markerConflict(path string) planConflict {
+	return planConflict{Kind: "file", Path: path, Reason: "contains unresolved conflict markers; edit the file or run creght resolve"}
+}
+
+// buildPullEntryPlan plans a pull. baseBody looks up recorded base content by
+// hash (nil disables merging); files changed on both sides are three-way
+// merged when the base content is available, otherwise reported as conflicts.
+func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, local map[string]snapshotEntry, remote map[string]snapshotEntry, baseBody func(hash string) (string, bool)) pullEntryPlan {
 	var plan pullEntryPlan
 	for _, path := range unionKeys(base, local, remote) {
 		baseEntry, baseOK := base[path]
@@ -341,10 +433,28 @@ func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, 
 		case localChanged && !remoteChanged:
 			continue
 		case localChanged && remoteChanged:
+			if localOK && remoteOK && hasConflictMarkers(localEntry.Body) {
+				plan.Conflicts = append(plan.Conflicts, markerConflict(path))
+				continue
+			}
+			if localOK && remoteOK && baseBody != nil {
+				if baseText, ok := baseBody(baseEntry.Hash); ok {
+					merged, clean := merge3(baseText, localEntry.Body, remoteEntry.Body)
+					entry := snapshotEntry{ID: remoteEntry.ID, Path: path, Hash: remoteEntry.Hash, Body: merged, Readonly: remoteEntry.Readonly}
+					if clean {
+						plan.CleanMerges = append(plan.CleanMerges, entry)
+					} else {
+						plan.ConflictWrites = append(plan.ConflictWrites, entry)
+					}
+					continue
+				}
+			}
 			plan.Conflicts = append(plan.Conflicts, planConflict{Kind: kind, Path: path, Reason: "changed both locally and remotely"})
 		}
 	}
 	sort.Slice(plan.Writes, func(i, j int) bool { return plan.Writes[i].Path < plan.Writes[j].Path })
+	sort.Slice(plan.CleanMerges, func(i, j int) bool { return plan.CleanMerges[i].Path < plan.CleanMerges[j].Path })
+	sort.Slice(plan.ConflictWrites, func(i, j int) bool { return plan.ConflictWrites[i].Path < plan.ConflictWrites[j].Path })
 	sort.Strings(plan.Deletes)
 	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Path < plan.Conflicts[j].Path })
 	return plan
@@ -430,6 +540,10 @@ func mergeStateSnapshot(base map[string]stateEntry, hasState bool, local map[str
 		remoteEntry, remoteOK := remote[path]
 		switch {
 		case localOK && baseOK && localEntry.Hash == baseEntry.Hash && (!remoteOK || remoteEntry.Hash != baseEntry.Hash):
+			next[path] = snapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
+		case localOK && remoteOK && baseOK && localEntry.Hash != baseEntry.Hash && remoteEntry.Hash != baseEntry.Hash && localEntry.Hash != remoteEntry.Hash:
+			// Unresolved both-sides change (e.g. push --skip-conflicts): keep
+			// the old base so a later pull can still three-way merge.
 			next[path] = snapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
 		case localOK && remoteOK:
 			next[path] = remoteEntry

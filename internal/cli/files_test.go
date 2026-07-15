@@ -33,7 +33,9 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 		"Project ID: project-1",
 		"Site ID: site-1",
 		"Editor URL: https://creght.cn/editor/project/project-1/site/site-1",
-		"creght push --site_id=project-1/site-1",
+		".creght/state.json records the site ID",
+		"do not repeat --site_id or --dir",
+		"creght pull\ncreght diff\ncreght push",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("AGENTS.md missing %q in:\n%s", want, text)

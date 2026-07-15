@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
 )
 
 type Syncer struct {
@@ -64,66 +62,6 @@ func newClientID() string {
 	return "creght-cli-" + hex.EncodeToString(b[:])
 }
 
-func (s *Syncer) Run(ctx context.Context) error {
-	if err := s.PushSafe(ctx, false); err != nil {
-		return err
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
-	}
-	defer watcher.Close()
-
-	err = s.watchDirs(watcher)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Syncing %s -> %s/%s\n", s.dir, s.projectID, s.siteID)
-
-	debounce := map[string]*time.Timer{}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-watcher.Errors:
-			if err != nil {
-				fmt.Printf("watch error: %v\n", err)
-			}
-		case event := <-watcher.Events:
-			if shouldSkipLocalPath(s.dir, event.Name) {
-				continue
-			}
-			if event.Op&fsnotify.Create != 0 {
-				info, statErr := os.Stat(event.Name)
-				if statErr == nil && info.IsDir() {
-					_ = filepath.WalkDir(event.Name, func(path string, d os.DirEntry, err error) error {
-						if err != nil || !d.IsDir() {
-							return nil
-						}
-						if shouldSkipLocalPath(s.dir, path) {
-							return filepath.SkipDir
-						}
-						return watcher.Add(path)
-					})
-				}
-			}
-
-			key := event.Name
-			if timer, ok := debounce[key]; ok {
-				timer.Stop()
-			}
-			debounce[key] = time.AfterFunc(400*time.Millisecond, func() {
-				delete(debounce, key)
-				if err := s.handleEvent(context.Background(), event); err != nil {
-					fmt.Printf("sync %s: %v\n", event.Name, err)
-				}
-			})
-		}
-	}
-}
-
 // requireWorkspace 校验 s.dir 是一个已 pull 的、属于目标站点的工作区。
 // push/sync/diff 不允许把任意目录隐式当作工作区（曾发生误从无关目录 push 导致整棵仓库被上传）。
 func (s *Syncer) requireWorkspace() error {
@@ -165,15 +103,19 @@ func (s *Syncer) Push(ctx context.Context) error {
 	return s.saveCurrentState()
 }
 
-func (s *Syncer) PushSafe(ctx context.Context, allowDelete bool) error {
+// PushSafe uploads local changes after a three-way comparison. Conflicted
+// files abort the push unless skipConflicts is set, in which case everything
+// else is pushed and the conflicted files keep their base state so a later
+// pull can still merge them.
+func (s *Syncer) PushSafe(ctx context.Context, allowDelete bool, skipConflicts bool) error {
 	planCtx, err := s.buildPlanContext(ctx, allowDelete)
 	if err != nil {
 		return err
 	}
 	plan := planCtx.plan
-	if plan.hasConflicts() {
+	if plan.hasConflicts() && !skipConflicts {
 		printSyncPlan(plan, false)
-		return fmt.Errorf("push has conflicts; run creght pull to refresh the local workspace, or use --force to overwrite remote changes")
+		return fmt.Errorf("push has conflicts; run creght pull to merge remote changes (then resolve if needed), use --skip-conflicts to push the rest, or --force to overwrite remote changes")
 	}
 	if !plan.hasChanges() {
 		printSyncPlan(plan, false)
@@ -192,16 +134,12 @@ func (s *Syncer) PushSafe(ctx context.Context, allowDelete bool) error {
 		return err
 	}
 	printSyncPlan(plan, false)
-	fmt.Printf("synced %d files\n", len(plan.FileActions))
-	return nil
-}
-
-func (s *Syncer) BuildPlan(ctx context.Context, allowDelete bool) (syncPlan, error) {
-	planCtx, err := s.buildPlanContext(ctx, allowDelete)
-	if err != nil {
-		return syncPlan{}, err
+	if plan.hasConflicts() {
+		fmt.Printf("synced %d files, skipped %d conflicted file(s)\n", len(plan.FileActions), len(plan.Conflicts))
+	} else {
+		fmt.Printf("synced %d files\n", len(plan.FileActions))
 	}
-	return planCtx.plan, nil
+	return nil
 }
 
 func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPlanContext, error) {
@@ -287,6 +225,14 @@ func (s *Syncer) syncLocalSnapshot(ctx context.Context) error {
 		return nil
 	}
 
+	backupDir, err := s.backupDivergedRemoteFiles(actions)
+	if err != nil {
+		return err
+	}
+	if backupDir != "" {
+		fmt.Printf("Backed up overwritten remote files to %s\n", backupDir)
+	}
+
 	changes := make([]creght.SiteActionChange, 0, len(actions))
 	for _, action := range actions {
 		changes = append(changes, action.action)
@@ -304,6 +250,41 @@ func (s *Syncer) syncLocalSnapshot(ctx context.Context) error {
 
 	fmt.Printf("synced %d files\n", len(actions))
 	return nil
+}
+
+// backupDivergedRemoteFiles saves remote copies that the given actions will
+// overwrite or delete when the remote content diverged from the recorded base
+// — i.e. remote edits that exist nowhere locally and would otherwise be lost.
+func (s *Syncer) backupDivergedRemoteFiles(actions []localFileAction) (string, error) {
+	state, hasState, err := loadWorkspaceState(s.dir)
+	if err != nil {
+		return "", err
+	}
+
+	toBackup := map[string]string{}
+	s.mu.Lock()
+	for _, action := range actions {
+		remote, ok := s.remoteByPath[action.remotePath]
+		if !ok {
+			continue
+		}
+		hash := strings.TrimSpace(remote.Hash)
+		if hash == "" {
+			hash, _ = qetagHash([]byte(remote.Body))
+		}
+		if hasState {
+			if base, ok := state.Files[action.remotePath]; ok && base.Hash == hash {
+				continue
+			}
+		}
+		toBackup[action.remotePath] = remote.Body
+	}
+	s.mu.Unlock()
+
+	if len(toBackup) == 0 {
+		return "", nil
+	}
+	return writeBackupFiles(s.dir, "remote", toBackup)
 }
 
 func (s *Syncer) siteRef() string {
@@ -387,76 +368,6 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 	return actions, nil
 }
 
-func (s *Syncer) watchDirs(watcher *fsnotify.Watcher) error {
-	return filepath.WalkDir(s.dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if shouldSkipLocalPath(s.dir, path) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !d.IsDir() {
-			return nil
-		}
-
-		return watcher.Add(path)
-	})
-}
-
-func (s *Syncer) handleEvent(ctx context.Context, event fsnotify.Event) error {
-	if !isPathInside(s.dir, event.Name) {
-		return nil
-	}
-
-	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
-		remotePath, err := localPathToRemote(s.dir, event.Name)
-		if err != nil {
-			return err
-		}
-
-		return s.deleteRemotePath(ctx, remotePath)
-	}
-	if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-		info, err := os.Stat(event.Name)
-		if err != nil || info.IsDir() {
-			return nil
-		}
-
-		return s.upsertLocalFile(ctx, event.Name)
-	}
-
-	return nil
-}
-
-func (s *Syncer) upsertLocalFile(ctx context.Context, localPath string) error {
-	action, changed, err := s.localFileAction(localPath)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return nil
-	}
-
-	_, err = s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, []creght.SiteActionChange{action.action})
-	if err != nil {
-		return err
-	}
-
-	err = s.refreshRemote(ctx)
-	if err != nil {
-		return err
-	}
-	if err := s.saveLocalBaseState(); err != nil {
-		return err
-	}
-
-	fmt.Printf("synced %s\n", action.remotePath)
-	return nil
-}
-
 func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error) {
 	remotePath, err := localPathToRemote(s.dir, localPath)
 	if err != nil {
@@ -503,33 +414,6 @@ func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error
 	}
 
 	return localFileAction{remotePath: remotePath, action: action}, true, nil
-}
-
-func (s *Syncer) deleteRemotePath(ctx context.Context, remotePath string) error {
-	s.mu.Lock()
-	remote, exist := s.remoteByPath[remotePath]
-	s.mu.Unlock()
-	if !exist || remote.Readonly {
-		return nil
-	}
-
-	_, err := s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, []creght.SiteActionChange{
-		deleteFileAction(remotePath).action,
-	})
-	if err != nil {
-		return err
-	}
-
-	err = s.refreshRemote(ctx)
-	if err != nil {
-		return err
-	}
-	if err := s.saveLocalBaseState(); err != nil {
-		return err
-	}
-
-	fmt.Printf("deleted %s\n", remotePath)
-	return nil
 }
 
 func printSyncPlan(plan syncPlan, dryRun bool) {

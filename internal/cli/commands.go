@@ -48,9 +48,9 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Long: fmt.Sprintf(`Creght CLI authenticates with Creght, lists projects and sites,
-pulls remote site files (including Func code) into a local workspace, pushes
-local changes back to Creght, watches local files for sync, opens previews, and
-publishes sites.
+pulls remote site files (including Func code) into a local workspace with
+three-way merge, pushes local changes back to Creght, resolves conflicts,
+opens previews, and publishes sites.
 
 Current API host: %s`, helpAPIHost()),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,39 +77,75 @@ Func keys map to backend/func/ (e.g. booking <-> backend/func/booking.ts).
 
 Without --dir, pull discovers .creght/state.json from the current directory or
 its parents and reuses its site_id. The first pull still requires --site_id.
-Without a path it merges the whole site (keeps local-only edits, reports
-conflicts). With an optional <path> it pulls just that one file and updates only
-its base state. --force overwrites local with the remote copy.`),
+Without a path it merges the whole site; with an optional <path> it pulls just
+that one file and updates only its base state.
+
+Files changed only remotely are updated; local-only edits are kept. Files
+changed on both sides are three-way merged against the base: non-overlapping
+edits merge automatically, overlapping edits write git-style conflict markers
+into the file (see creght resolve). Local content that pull overwrites is
+first backed up under .creght/backup/. --force skips merging and overwrites
+local with the remote copy.`),
 		withExample(`  creght pull --site_id=<pid>/<sid> --dir=./mysite
-  creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite
+  creght pull
+  creght pull page/Index.tsx
   creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite --force`)))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local site file changes before pushing.", runDiff,
 		withLong(`Show what push would change, comparing three versions: the base snapshot in
 .creght/state.json, current local files, and current remote files.
 
+Without --dir, diff discovers .creght/state.json from the current directory or
+its parents and reuses its site_id.
+
 --json prints a machine-readable plan: {"has_conflicts":bool,"files":[{"path",
 "status","action"}]} where status is local-change | remote-only | conflict |
-no-base. With <path> it prints a line diff (remote vs local) of that one file.`),
-		withExample(`  creght diff --site_id=<pid>/<sid> --dir=./mysite
-  creght diff --site_id=<pid>/<sid> --dir=./mysite --json
-  creght diff page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite`)))
+no-base. Conflict entries additionally carry "reason", "auto_mergeable"
+(whether creght pull would merge them without markers), "base_to_local_diff"
+and "base_to_remote_diff", so an agent can resolve without extra round-trips.
+With <path> it prints a line diff (remote vs local) of that one file.`),
+		withExample(`  creght diff
+  creght diff --json
+  creght diff page/Index.tsx
+  creght diff --site_id=<pid>/<sid> --dir=./mysite`)))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "push", "Safely push local site file changes to Creght.", runPush,
 		withLong(`Upload local changes, comparing base/local/remote. Files changed only remotely
 are kept; local deletions are skipped unless --delete; files changed both
-locally and remotely report a conflict (inspect with creght cat/diff, then pull
-or overwrite). --force overwrites remote with the local snapshot.
+locally and remotely report a conflict — run creght pull to merge them, or use
+--skip-conflicts to push everything else and leave the conflicted files for a
+later pull. Files still containing conflict markers are refused (see creght
+resolve). --force overwrites remote with the local snapshot, backing up
+diverged remote copies under .creght/backup/ first.
+
+With an optional <path> it pushes just that one file and updates only its base
+state (use --force to overwrite a remote copy that moved since the last pull).
 
 Without --dir, push discovers .creght/state.json from the current directory or
 its parents and reuses its site_id, so creght push works anywhere inside a
 pulled workspace.
 
 push does not publish. Use creght publish to promote changes to the live site.`),
-		withExample(`  creght push --site_id=<pid>/<sid> --dir=./mysite
-  creght push --site_id=<pid>/<sid> --dir=./mysite --delete`)))
-	root.AddCommand(siteFileCommand(ctx, rawArgs, "sync", "Watch local site files and sync changes back to Creght.", runSync,
-		withLong(`Run the safe push check once, then watch the workspace and push changes in
-realtime. sync uploads local->remote only; it does not merge remote edits into
-local files — run creght pull for that.`)))
+		withExample(`  creght push
+  creght push --delete
+  creght push --skip-conflicts
+  creght push page/Index.tsx
+  creght push --site_id=<pid>/<sid> --dir=./mysite`)))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"resolve"}, "resolve [path]", "List or resolve conflict markers left by creght pull.", runResolve, func(flags *pflag.FlagSet) {
+		flags.String("dir", ".", "Local Creght project directory.")
+		flags.Bool("list", false, "List files containing conflict markers.")
+		flags.Bool("ours", false, "Keep the local side of every conflict in <path>.")
+		flags.Bool("theirs", false, "Keep the remote side of every conflict in <path>.")
+	},
+		withLong(`When creght pull finds overlapping local and remote edits it writes git-style
+conflict markers (<<<<<<< local / ======= / >>>>>>> remote) into the file.
+push refuses to upload files that still contain markers.
+
+Without <path> (or with --list) resolve lists the files that contain markers.
+With <path> and --ours it keeps the local side of every conflict; --theirs
+keeps the remote side. Editing the markers by hand works too. After resolving,
+run creght push.`),
+		withExample(`  creght resolve --list
+  creght resolve page/Index.tsx --ours
+  creght resolve page/Index.tsx --theirs`)))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"cat"}, "cat <path>", "Print one site file's content to stdout (remote by default, or local).", runCat, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
 		flags.String("dir", ".", "Local Creght project directory.")
@@ -117,10 +153,15 @@ local files — run creght pull for that.`)))
 	},
 		withLong(`Print a single site file's content to stdout without pulling the whole
 workspace. --ref remote (default) reads the live remote file; --ref local reads
-the workspace copy. <path> accepts a remote path (/page/x.tsx) or a
-workspace-relative path (page/x.tsx).`),
-		withExample(`  creght cat page/Index.tsx --site_id=<pid>/<sid>
-  creght cat page/Index.tsx --ref=local --dir=./mysite`)))
+the workspace copy.
+
+Inside a pulled workspace, cat discovers .creght/state.json like pull/push, so
+--site_id is optional there. <path> accepts a workspace-root path (/page/x.tsx)
+or a relative path (page/x.tsx), resolved from the current directory when run
+inside the workspace.`),
+		withExample(`  creght cat page/Index.tsx
+  creght cat page/Index.tsx --ref=local
+  creght cat page/Index.tsx --site_id=<pid>/<sid>`)))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
@@ -224,7 +265,7 @@ func siteCommand(ctx context.Context, rawArgs []string, name string, short strin
 
 func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error, opts ...cmdOpt) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
-		addSiteIDFlag(flags)
+		flags.String("site_id", "", "Site reference in <project_id>/<site_id> format. Optional inside a pulled workspace.")
 		flags.String("dir", ".", "Local Creght project directory.")
 		if name == "pull" {
 			flags.Bool("force", false, "Overwrite local files with the remote workspace.")
@@ -232,6 +273,7 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 		if name == "push" {
 			flags.Bool("delete", false, "Delete remote files/functions that were removed locally.")
 			flags.Bool("force", false, "Overwrite remote with the local workspace snapshot.")
+			flags.Bool("skip-conflicts", false, "Push non-conflicting files and keep conflicted ones for a later pull.")
 		}
 		if name == "diff" {
 			flags.Bool("delete", false, "Show remote deletions for files/functions removed locally.")

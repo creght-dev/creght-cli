@@ -237,6 +237,9 @@ func runPull(ctx context.Context, args []string) error {
 		return err
 	}
 	*dir, *siteID = resolvedDir, resolvedSiteID
+	if !flagWasSet(fs, "dir") {
+		printWorkspaceNotice(*dir)
+	}
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -260,17 +263,34 @@ func runPull(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fileChangeCount := len(files.List)
+	remoteSnap := remoteFileSnapshot(files.List)
+	var outcome pullOutcome
 	if *force {
-		err = writeRemoteFilesToWorkspace(*dir, files.List)
+		state, hasState, err := loadWorkspaceState(*dir)
 		if err != nil {
 			return err
 		}
-		if err := saveWorkspaceState(*dir, projectID+"/"+realSiteID, remoteFileSnapshot(files.List)); err != nil {
+		localFiles, err := localFileSnapshot(*dir)
+		if err != nil {
 			return err
 		}
+		incoming := map[string]string{}
+		for path, entry := range remoteSnap {
+			incoming[path] = entry.Body
+		}
+		outcome.backupDir, err = backupOverwrittenLocalFiles(*dir, state, hasState, localFiles, incoming)
+		if err != nil {
+			return err
+		}
+		if err := writeRemoteFilesToWorkspace(*dir, files.List); err != nil {
+			return err
+		}
+		if err := saveWorkspaceState(*dir, projectID+"/"+realSiteID, remoteSnap); err != nil {
+			return err
+		}
+		outcome.changed = len(files.List)
 	} else {
-		fileChangeCount, err = safePullWorkspace(*dir, projectID+"/"+realSiteID, remoteFileSnapshot(files.List))
+		outcome, err = safePullWorkspace(*dir, projectID+"/"+realSiteID, remoteSnap)
 		if err != nil {
 			return err
 		}
@@ -283,7 +303,16 @@ func runPull(ctx context.Context, args []string) error {
 	}
 
 	previewURL, _ := previewURL(ctx, client, realSiteID)
-	fmt.Printf("Pulled %d changes into %s\n", fileChangeCount, *dir)
+	for _, path := range outcome.merged {
+		fmt.Printf("merged %s\n", path)
+	}
+	for _, path := range outcome.conflicted {
+		fmt.Printf("conflict %s: wrote conflict markers\n", path)
+	}
+	if outcome.backupDir != "" {
+		fmt.Printf("Backed up overwritten local files to %s\n", outcome.backupDir)
+	}
+	fmt.Printf("Pulled %d changes into %s\n", outcome.changed, *dir)
 	if createdAgents {
 		fmt.Printf("Generated AGENTS.md for Creght agent context\n")
 	}
@@ -292,45 +321,84 @@ func runPull(ctx context.Context, args []string) error {
 		fmt.Printf("Preview: %s\n", previewURL)
 	}
 
+	if len(outcome.conflicted) > 0 {
+		return fmt.Errorf("pulled with %d conflicted file(s); edit the conflict markers or run creght resolve, then push", len(outcome.conflicted))
+	}
 	return nil
 }
 
-func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapshotEntry) (int, error) {
+// pullOutcome summarizes what a pull did, for reporting.
+type pullOutcome struct {
+	changed    int
+	merged     []string // both sides changed, auto-merged cleanly
+	conflicted []string // both sides changed, conflict markers written
+	backupDir  string   // where overwritten local work was saved, if any
+}
+
+func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapshotEntry) (pullOutcome, error) {
+	var outcome pullOutcome
 	state, hasState, err := loadWorkspaceState(root)
 	if err != nil {
-		return 0, err
+		return outcome, err
 	}
 	if hasState && strings.TrimSpace(state.SiteID) != "" && state.SiteID != siteID {
-		return 0, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, siteID)
+		return outcome, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, siteID)
 	}
 
 	localFiles, err := localFileSnapshot(root)
 	if err != nil {
-		return 0, err
+		return outcome, err
 	}
 
-	filePlan := buildPullEntryPlan("file", state.Files, hasState, localFiles, remoteFiles)
+	filePlan := buildPullEntryPlan("file", state.Files, hasState, localFiles, remoteFiles, func(hash string) (string, bool) {
+		return readBaseObject(root, hash)
+	})
 	if len(filePlan.Conflicts) > 0 {
 		for _, conflict := range filePlan.Conflicts {
 			fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
 		}
-		return 0, fmt.Errorf("pull has conflicts; resolve local changes first, or use --force to overwrite local files")
+		return outcome, fmt.Errorf("pull has conflicts; resolve local changes first, or use --force to overwrite local files")
+	}
+
+	incoming := map[string]string{}
+	for _, entry := range filePlan.CleanMerges {
+		incoming[entry.Path] = entry.Body
+	}
+	for _, entry := range filePlan.ConflictWrites {
+		incoming[entry.Path] = entry.Body
+	}
+	outcome.backupDir, err = backupOverwrittenLocalFiles(root, state, hasState, localFiles, incoming)
+	if err != nil {
+		return outcome, err
 	}
 
 	for _, entry := range filePlan.Writes {
 		if err := writePulledFile(root, entry); err != nil {
-			return 0, err
+			return outcome, err
 		}
+	}
+	for _, entry := range filePlan.CleanMerges {
+		if err := writePulledFile(root, entry); err != nil {
+			return outcome, err
+		}
+		outcome.merged = append(outcome.merged, entry.Path)
+	}
+	for _, entry := range filePlan.ConflictWrites {
+		if err := writePulledFile(root, entry); err != nil {
+			return outcome, err
+		}
+		outcome.conflicted = append(outcome.conflicted, entry.Path)
 	}
 	for _, path := range filePlan.Deletes {
 		if err := deletePulledFile(root, path); err != nil {
-			return 0, err
+			return outcome, err
 		}
 	}
 	if err := saveWorkspaceState(root, siteID, remoteFiles); err != nil {
-		return 0, err
+		return outcome, err
 	}
-	return len(filePlan.Writes) + len(filePlan.Deletes), nil
+	outcome.changed = len(filePlan.Writes) + len(filePlan.CleanMerges) + len(filePlan.ConflictWrites) + len(filePlan.Deletes)
+	return outcome, nil
 }
 
 func writePulledFile(root string, entry snapshotEntry) error {
@@ -362,50 +430,15 @@ func siteEditorURL(webHost string, projectID string, siteID string) string {
 	return fmt.Sprintf("%s/teditor/project/%s/site/%s", strings.TrimRight(webHost, "/"), url.PathEscape(projectID), url.PathEscape(siteID))
 }
 
-func runSync(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	dir := fs.String("dir", ".", "local directory")
-	err := fs.Parse(args)
-	if err != nil {
-		return err
-	}
-	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), true)
-	if err != nil {
-		return err
-	}
-	*dir, *siteID = resolvedDir, resolvedSiteID
-
-	projectID, realSiteID, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-
-	syncer, err := NewSyncer(client, projectID, realSiteID, *dir)
-	if err != nil {
-		return err
-	}
-
-	previewURL, _ := previewURL(ctx, client, realSiteID)
-	if previewURL != "" {
-		fmt.Printf("Preview: %s\n", previewURL)
-	}
-
-	return syncer.Run(ctx)
-}
-
 func runPush(ctx context.Context, args []string) error {
+	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("push", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
 	allowDelete := fs.Bool("delete", false, "delete remote files/functions that were removed locally")
 	force := fs.Bool("force", false, "overwrite remote with the local workspace snapshot")
-	err := fs.Parse(args)
+	skipConflicts := fs.Bool("skip-conflicts", false, "push non-conflicting files and keep conflicted ones for a later pull")
+	err := fs.Parse(flagArgs)
 	if err != nil {
 		return err
 	}
@@ -414,10 +447,20 @@ func runPush(ctx context.Context, args []string) error {
 		return err
 	}
 	*dir, *siteID = resolvedDir, resolvedSiteID
+	if !flagWasSet(fs, "dir") {
+		printWorkspaceNotice(*dir)
+	}
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
 		return err
+	}
+
+	if len(positionals) > 1 {
+		return fmt.Errorf("push accepts at most one <path> argument")
+	}
+	if len(positionals) == 1 {
+		return pushOneFile(ctx, projectID, realSiteID, *dir, positionals[0], *force)
 	}
 
 	client, _, err := clientFromConfig()
@@ -434,7 +477,7 @@ func runPush(ctx context.Context, args []string) error {
 		if err := syncer.Push(ctx); err != nil {
 			return err
 		}
-	} else if err := syncer.PushSafe(ctx, *allowDelete); err != nil {
+	} else if err := syncer.PushSafe(ctx, *allowDelete, *skipConflicts); err != nil {
 		return err
 	}
 
@@ -458,6 +501,9 @@ func runDiff(ctx context.Context, args []string) error {
 		return err
 	}
 	*dir, *siteID = resolvedDir, resolvedSiteID
+	if !flagWasSet(fs, "dir") && !*jsonOut {
+		printWorkspaceNotice(*dir)
+	}
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -481,16 +527,17 @@ func runDiff(ctx context.Context, args []string) error {
 		return err
 	}
 
-	plan, err := syncer.BuildPlan(ctx, *allowDelete)
+	planCtx, err := syncer.buildPlanContext(ctx, *allowDelete)
 	if err != nil {
 		return err
 	}
+	plan := planCtx.plan
 	if *jsonOut {
-		return printPlanJSON(plan)
+		return printPlanJSON(plan, conflictJSONDetails(*dir, planCtx, syncer.currentRemoteFileSnapshot()))
 	}
 	printSyncPlan(plan, true)
 	if plan.hasConflicts() {
-		return fmt.Errorf("diff has conflicts; run creght pull to refresh the local workspace, or inspect the remote changes before pushing")
+		return fmt.Errorf("diff has conflicts; run creght pull to merge remote changes, then resolve any conflict markers before pushing")
 	}
 	return nil
 }
@@ -594,6 +641,30 @@ func parseSiteRef(ref string) (string, string, error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+// printWorkspaceNotice reports which discovered workspace root a command
+// operates on when it is not the current directory, so accidentally acting on
+// an ancestor workspace is visible before anything happens.
+func printWorkspaceNotice(root string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return
+	}
+	rootResolved, cwdResolved := absRoot, cwd
+	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+		rootResolved = r
+	}
+	if c, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwdResolved = c
+	}
+	if rootResolved != cwdResolved {
+		fmt.Printf("workspace: %s\n", absRoot)
+	}
 }
 
 func flagWasSet(fs *flag.FlagSet, name string) bool {

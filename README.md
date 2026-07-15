@@ -79,7 +79,7 @@ project_id    Project Name
   project_id/site_id    Site Name
 ```
 
-Use the `project_id/site_id` value with `pull`, `push`, and `sync`.
+Use the `project_id/site_id` value with `pull` and `push`.
 
 ## Create Project
 
@@ -139,6 +139,25 @@ simply the set of site files under `backend/func/`; for example
 `backend/func/booking.ts` is the Func with key `booking`, and
 `backend/func/profile/settings.ts` is `profile/settings`.
 
+The first pull requires `--site_id` and usually `--dir`. After that,
+`.creght/state.json` records the site reference. From the workspace root or any
+child directory, `pull`, `diff`, and `push` find that file by walking upward,
+so normal ongoing usage does not repeat either option:
+
+```bash
+creght pull
+creght diff
+creght push
+```
+
+Pass `--dir` and `--site_id` explicitly when operating on another workspace.
+
+Single-file `<path>` arguments resolve from the current directory, git-style:
+`creght push Index.tsx` run inside `page/` pushes `/page/Index.tsx`, while
+paths starting with `/` are always workspace-root paths. When the discovered
+workspace root differs from the current directory, commands print
+`workspace: <root>` before doing anything.
+
 ## Local Vite Preview
 
 Creght projects pulled by the CLI usually do not have their own `package.json`
@@ -192,7 +211,8 @@ module after local file changes without a full page reload.
 Push the current local directory snapshot to Creght and exit:
 
 ```bash
-creght push --site_id=<project_id>/<site_id> --dir=./mysite
+cd ./mysite
+creght push
 ```
 
 For local development:
@@ -211,25 +231,40 @@ renaming, or deleting a file under `backend/func/` creates, updates, renames, or
 deletes the corresponding site file, and Func code is versioned and published
 together with the rest of the site.
 
-## Sync Local Changes
+## Resolve Conflicts
 
-Run watch mode for a local directory:
+`pull` and `push` compare three versions of every file: the base snapshot
+recorded at the last pull/push (hashes in `.creght/state.json`, contents under
+`.creght/base/`), the current local file, and the current remote file.
+
+When a file changed on both sides, `pull` three-way merges it:
+
+- Non-overlapping edits merge automatically; the file is reported as `merged`
+  and the result stays local until the next `push`.
+- Overlapping edits write git-style conflict markers
+  (`<<<<<<< local` / `=======` / `>>>>>>> remote`) into the file and `pull`
+  exits non-zero.
+
+List and resolve marker files:
 
 ```bash
-creght sync --site_id=<project_id>/<site_id> --dir=./mysite
+creght resolve --list
+creght resolve page/Index.tsx --ours    # keep the local side
+creght resolve page/Index.tsx --theirs  # keep the remote side
 ```
 
-For local development:
+Editing the markers by hand works too. `push` refuses to upload any file that
+still contains conflict markers.
 
-```bash
-CREGHT_API_HOST=http://localhost:8433 creght sync --site_id=<project_id>/<site_id> --dir=./mysite
-```
+`push` reports a conflict for files changed on both sides — run `creght pull`
+to merge them first, push the rest with `creght push --skip-conflicts`, or
+overwrite remote with `creght push --force`. Before anything is overwritten
+(local work by `pull`, diverged remote copies by `push --force`), the losing
+content is backed up under `.creght/backup/<timestamp>-*/`.
 
-`sync` first pushes the current local snapshot, then keeps running and
-automatically listens for local file changes. When any workspace file
-(including Func code under `backend/func/`) changes locally, the CLI updates
-the corresponding remote site file in realtime. The command also prints the
-remote preview URL when available.
+`creght diff --json` marks each conflict with `reason`, `auto_mergeable`, and
+`base_to_local_diff` / `base_to_remote_diff`, so agents can decide how to
+resolve without extra round-trips.
 
 ## Local Web Editor Bidirectional Sync
 
@@ -442,7 +477,7 @@ The workflow is the same as for any site file:
 1. Run `creght pull --site_id=<project_id>/<site_id> --dir=./mysite`.
 2. Edit or create files under `./mysite/backend/func/`.
 3. Run `creght push --site_id=<project_id>/<site_id> --dir=./mysite`, or keep
-   `creght sync` / `creght dev` running.
+   `creght dev` running.
 
 Examples:
 
@@ -452,7 +487,7 @@ Examples:
 Because Func code is just a site file, it is versioned and published together
 with the site, and it participates in the same 3-way merge and conflict
 detection as every other file. Deleting a local Func file deletes the remote
-site file on the next push/sync; renaming is treated as delete + create.
+site file on the next push (with `--delete`); renaming is treated as delete + create.
 
 Func files should use ESM exports and the `(input, ctx)` signature:
 
@@ -485,7 +520,7 @@ The output matches the Func HTTP response protocol: successful runs print
 top-level `ok` execution wrapper.
 
 There are no `creght func list/get/create/update/delete` commands. Manage Func
-code by editing `backend/func` files and syncing them with pull/push/sync/dev
+code by editing `backend/func` files and syncing them with pull/push/dev
 like any other site file; `func run` only runs sample input.
 
 ## Upload Assets
@@ -510,35 +545,30 @@ Optional flags:
 creght upload --site_id=<project_id>/<site_id> --file=./image.png --name=hero.png --mimetype=image/png
 ```
 
-## Push And Sync Boundary
+## Push And Pull Boundary
 
-The current MVP push/sync mode is one-way:
+`push` is one-way:
 
 ```text
 local directory -> Creght remote site
 ```
 
-`push` fetches the remote file list to build the local path to remote file id
-mapping, scans the local directory, uploads the current local snapshot, and then
-exits.
+`push` fetches the remote file list, compares base/local/remote, uploads local
+changes, and then exits. It never merges remote edits into local files — that
+is `pull`'s job. If you edit the same site in the Web editor, run `creght pull`
+to merge those edits into the workspace before pushing (see Resolve
+Conflicts above).
 
-`sync` is watch mode. It performs the same initial local snapshot push, then
-keeps running and automatically listens for later local changes.
-
-Neither command pulls Web editor changes back to the local directory while
-running. If you edit the same site in the Web editor, run `pull` manually or
-restart from a clean local copy before continuing.
-
-Use a test project/site while validating the CLI. Do not run `push` or `sync`
+Use a test project/site while validating the CLI. Do not run `push --force`
 against production content unless the local directory is intended to be the
 source of truth.
 
 ## Commands
 
 Creght CLI is a local bridge for Creght site code. It can authenticate with
-Creght, list projects and sites, pull remote site files into a local directory,
-push local files back to Creght, watch local files for realtime sync, open the
-remote preview, and publish a site.
+Creght, list projects and sites, pull remote site files into a local directory
+with three-way merge, push local files back to Creght, resolve conflicts, open
+the remote preview, and publish a site.
 
 The CLI commands still use the Creght backend and web app for the canonical
 preview. The Vite plugin is a local development helper and intentionally does
@@ -550,7 +580,7 @@ creght logout
 creght project list
 creght pull --site_id=<project_id>/<site_id> --dir=./mysite
 creght push --site_id=<project_id>/<site_id> --dir=./mysite
-creght sync --site_id=<project_id>/<site_id> --dir=./mysite
+creght resolve --list
 creght dev --site_id=<project_id>/<site_id> --dir=./mysite [--web=https://creght.cn]
 creght preview --site_id=<project_id>/<site_id>
 creght publish --site_id=<project_id>/<site_id> [--note=<note>]
@@ -572,9 +602,9 @@ Command meanings:
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
-- `pull`: Download site files (including Func code under `backend/func/`) into a local workspace.
-- `push`: Push the current local workspace snapshot to the remote site/project.
-- `sync`: Watch mode; push the current snapshot, then keep listening for local changes.
+- `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.
+- `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
+- `resolve`: List files with conflict markers, or resolve one by keeping the local (`--ours`) or remote (`--theirs`) side.
 - `dev`: Bidirectionally sync local files with cloud realtime files and the online Web editor.
 - `preview`: Open the remote preview URL for a site in the browser.
 - `publish`: Publish a site to make the current remote site version live.
@@ -582,7 +612,7 @@ Command meanings:
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
 - `table`: Manage project JSON tables and records used by Func.
-- `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push/sync/dev.
+- `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push/dev.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 

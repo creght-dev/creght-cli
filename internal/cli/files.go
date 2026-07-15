@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -163,17 +164,76 @@ profile/settings.
 
 Func code is just ordinary site source under backend/func/. It is synced,
 versioned, and published together with the site through the normal pull, push,
-sync, and dev flows. The only dedicated Func endpoint is invocation, used by
+and dev flows. The only dedicated Func endpoint is invocation, used by
 creght func run to test a Func with sample input.
 
 Use the Creght CLI for ongoing maintenance:
 
+The workspace's .creght/state.json records the site ID. From the workspace root
+or any child directory, pull, diff, and push discover that state file by walking
+upward, so do not repeat --site_id or --dir unless targeting a different
+workspace explicitly.
+
 `+"```bash"+`
-creght pull --site_id=%s/%s
-creght push --site_id=%s/%s
-creght sync --site_id=%s/%s
+creght pull
+creght diff
+creght push
 `+"```"+`
-`, projectID, siteID, editorURL, projectID, siteID, projectID, siteID, projectID, siteID)
+
+pull three-way merges remote and local edits; overlapping edits leave git-style
+conflict markers in the file. Use creght resolve --list to find them and
+creght resolve <path> --ours|--theirs (or edit by hand) before pushing.
+`, projectID, siteID, editorURL)
+}
+
+// writeBackupFiles copies path->body contents into a fresh directory under
+// .creght/backup/, mirroring the workspace layout, and returns that directory.
+// label distinguishes what was backed up (e.g. "local", "remote").
+func writeBackupFiles(root string, label string, files map[string]string) (string, error) {
+	backupRoot := filepath.Join(root, stateDirName, "backup")
+	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create backup dir: %w", err)
+	}
+	dir, err := os.MkdirTemp(backupRoot, time.Now().Format("20060102-150405")+"-"+label+"-")
+	if err != nil {
+		return "", fmt.Errorf("create backup dir: %w", err)
+	}
+	for path, body := range files {
+		localPath, err := remotePathToLocal(dir, path)
+		if err != nil {
+			return "", err
+		}
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			return "", fmt.Errorf("create backup parent dir for %s: %w", path, err)
+		}
+		if err := os.WriteFile(localPath, []byte(body), 0o644); err != nil {
+			return "", fmt.Errorf("write backup %s: %w", path, err)
+		}
+	}
+	return dir, nil
+}
+
+// backupOverwrittenLocalFiles backs up local files that are about to be
+// overwritten by incoming content and whose current content diverged from the
+// recorded base (uncommitted local work). Returns "" when nothing needed it.
+func backupOverwrittenLocalFiles(root string, state workspaceState, hasState bool, localFiles map[string]snapshotEntry, incoming map[string]string) (string, error) {
+	toBackup := map[string]string{}
+	for path, newBody := range incoming {
+		local, ok := localFiles[path]
+		if !ok || local.Body == newBody {
+			continue
+		}
+		if hasState {
+			if base, ok := state.Files[path]; ok && base.Hash == local.Hash {
+				continue
+			}
+		}
+		toBackup[path] = local.Body
+	}
+	if len(toBackup) == 0 {
+		return "", nil
+	}
+	return writeBackupFiles(root, "local", toBackup)
 }
 
 func shouldSkipLocalPath(root string, path string) bool {
