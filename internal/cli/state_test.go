@@ -1,6 +1,66 @@
 package cli
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestResolveSiteWorkspaceDiscoversParentAndSiteID(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "pages", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveWorkspaceState(root, "project/site", map[string]snapshotEntry{}); err != nil {
+		t.Fatal(err)
+	}
+
+	gotRoot, gotSiteID, err := resolveSiteWorkspace(nested, "", true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRoot != root {
+		t.Fatalf("root = %q, want %q", gotRoot, root)
+	}
+	if gotSiteID != "project/site" {
+		t.Fatalf("site id = %q, want project/site", gotSiteID)
+	}
+}
+
+func TestResolveSiteWorkspaceExplicitDirDoesNotSearchParents(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "new-site")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveWorkspaceState(root, "outer/site", map[string]snapshotEntry{}); err != nil {
+		t.Fatal(err)
+	}
+
+	gotRoot, gotSiteID, err := resolveSiteWorkspace(nested, "new/site", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRoot != nested {
+		t.Fatalf("root = %q, want %q", gotRoot, nested)
+	}
+	if gotSiteID != "new/site" {
+		t.Fatalf("site id = %q, want new/site", gotSiteID)
+	}
+}
+
+func TestResolveSiteWorkspaceRejectsMismatchedSiteID(t *testing.T) {
+	root := t.TempDir()
+	if err := saveWorkspaceState(root, "project/site", map[string]snapshotEntry{}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := resolveSiteWorkspace(root, "other/site", true, true)
+	if err == nil {
+		t.Fatal("expected mismatched site id error")
+	}
+}
 
 func TestBuildSyncPlanKeepsRemoteOnlyFilesWithoutBase(t *testing.T) {
 	plan := buildSyncPlan(workspaceState{}, false,

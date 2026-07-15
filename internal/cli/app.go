@@ -232,6 +232,11 @@ func runPull(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), false)
+	if err != nil {
+		return err
+	}
+	*dir, *siteID = resolvedDir, resolvedSiteID
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -365,6 +370,11 @@ func runSync(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), true)
+	if err != nil {
+		return err
+	}
+	*dir, *siteID = resolvedDir, resolvedSiteID
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -399,6 +409,11 @@ func runPush(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), true)
+	if err != nil {
+		return err
+	}
+	*dir, *siteID = resolvedDir, resolvedSiteID
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -438,6 +453,11 @@ func runDiff(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), true)
+	if err != nil {
+		return err
+	}
+	*dir, *siteID = resolvedDir, resolvedSiteID
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -574,6 +594,16 @@ func parseSiteRef(ref string) (string, string, error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func previewURL(ctx context.Context, client *creght.Client, siteID string) (string, error) {

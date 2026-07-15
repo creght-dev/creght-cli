@@ -75,6 +75,64 @@ func loadWorkspaceState(root string) (workspaceState, bool, error) {
 	return state, true, nil
 }
 
+// resolveSiteWorkspace resolves a command's workspace directory and site ref.
+// When searchParents is true (the caller did not explicitly pass --dir), it
+// walks upward so commands also work from a subdirectory of a pulled workspace.
+func resolveSiteWorkspace(dir string, siteID string, searchParents bool, requireWorkspace bool) (string, string, error) {
+	root, state, hasState, err := findWorkspaceState(dir, searchParents)
+	if err != nil {
+		return "", "", err
+	}
+	if !hasState {
+		if requireWorkspace {
+			absDir, absErr := filepath.Abs(dir)
+			if absErr != nil {
+				return "", "", fmt.Errorf("resolve workspace dir: %w", absErr)
+			}
+			return "", "", fmt.Errorf("%s is not inside a creght workspace (missing .creght/state.json); run creght pull --site_id=<project_id>/<site_id> first, or pass --dir pointing at a pulled workspace", absDir)
+		}
+		return dir, strings.TrimSpace(siteID), nil
+	}
+
+	stateSiteID := strings.TrimSpace(state.SiteID)
+	requestedSiteID := strings.TrimSpace(siteID)
+	if requestedSiteID == "" {
+		if stateSiteID == "" {
+			return "", "", fmt.Errorf("workspace %s has no site_id in .creght/state.json; pass --site_id=<project_id>/<site_id>", root)
+		}
+		requestedSiteID = stateSiteID
+	} else if stateSiteID != "" && requestedSiteID != stateSiteID {
+		return "", "", fmt.Errorf("workspace state belongs to %s, not %s", stateSiteID, requestedSiteID)
+	}
+
+	return root, requestedSiteID, nil
+}
+
+func findWorkspaceState(start string, searchParents bool) (string, workspaceState, bool, error) {
+	root, err := filepath.Abs(start)
+	if err != nil {
+		return "", workspaceState{}, false, fmt.Errorf("resolve workspace dir: %w", err)
+	}
+
+	for {
+		state, hasState, err := loadWorkspaceState(root)
+		if err != nil {
+			return "", workspaceState{}, false, err
+		}
+		if hasState {
+			return root, state, true, nil
+		}
+		if !searchParents {
+			return root, workspaceState{}, false, nil
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return root, workspaceState{}, false, nil
+		}
+		root = parent
+	}
+}
+
 func saveWorkspaceState(root string, siteID string, files map[string]snapshotEntry) error {
 	state := workspaceState{
 		SiteID:    siteID,

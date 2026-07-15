@@ -75,6 +75,8 @@ Current API host: %s`, helpAPIHost()),
 Local paths mirror remote site paths exactly (e.g. page/x.tsx <-> /page/x.tsx);
 Func keys map to backend/func/ (e.g. booking <-> backend/func/booking.ts).
 
+Without --dir, pull discovers .creght/state.json from the current directory or
+its parents and reuses its site_id. The first pull still requires --site_id.
 Without a path it merges the whole site (keeps local-only edits, reports
 conflicts). With an optional <path> it pulls just that one file and updates only
 its base state. --force overwrites local with the remote copy.`),
@@ -97,8 +99,9 @@ are kept; local deletions are skipped unless --delete; files changed both
 locally and remotely report a conflict (inspect with creght cat/diff, then pull
 or overwrite). --force overwrites remote with the local snapshot.
 
-Run push from the workspace root (the directory that contains .creght/), the
-same place pull created .creght/state.json.
+Without --dir, push discovers .creght/state.json from the current directory or
+its parents and reuses its site_id, so creght push works anywhere inside a
+pulled workspace.
 
 push does not publish. Use creght publish to promote changes to the live site.`),
 		withExample(`  creght push --site_id=<pid>/<sid> --dir=./mysite
