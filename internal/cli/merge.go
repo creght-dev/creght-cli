@@ -76,16 +76,34 @@ func eqLines(a []string, b []string) bool {
 }
 
 // lcsMatch returns the LCS alignment of a onto b as a map from a-line-index
-// to b-line-index.
+// to b-line-index. Common prefix and suffix lines are matched directly so the
+// O(n*m) DP only runs on the changed middle — a long file with one edit costs
+// almost nothing.
 func lcsMatch(a []string, b []string) map[int]int {
-	n, m := len(a), len(b)
+	match := map[int]int{}
+	prefix := 0
+	for prefix < len(a) && prefix < len(b) && a[prefix] == b[prefix] {
+		match[prefix] = prefix
+		prefix++
+	}
+	aEnd, bEnd := len(a), len(b)
+	for aEnd > prefix && bEnd > prefix && a[aEnd-1] == b[bEnd-1] {
+		aEnd--
+		bEnd--
+		match[aEnd] = bEnd
+	}
+
+	n, m := aEnd-prefix, bEnd-prefix
+	if n == 0 || m == 0 {
+		return match
+	}
 	dp := make([][]int, n+1)
 	for i := range dp {
 		dp[i] = make([]int, m+1)
 	}
 	for i := n - 1; i >= 0; i-- {
 		for j := m - 1; j >= 0; j-- {
-			if a[i] == b[j] {
+			if a[prefix+i] == b[prefix+j] {
 				dp[i][j] = dp[i+1][j+1] + 1
 			} else if dp[i+1][j] >= dp[i][j+1] {
 				dp[i][j] = dp[i+1][j]
@@ -95,12 +113,11 @@ func lcsMatch(a []string, b []string) map[int]int {
 		}
 	}
 
-	match := map[int]int{}
 	i, j := 0, 0
 	for i < n && j < m {
 		switch {
-		case a[i] == b[j]:
-			match[i] = j
+		case a[prefix+i] == b[prefix+j]:
+			match[prefix+i] = prefix + j
 			i++
 			j++
 		case dp[i+1][j] >= dp[i][j+1]:

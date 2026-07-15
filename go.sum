@@ -1,3 +1,5 @@
+github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ12Gv5o=
+github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/br41n10/qetag v0.2.1 h1:8IZIJsVOSQUUu7ywK768hB70N6G4m7hZgUXYYJ3YJRM=
 github.com/br41n10/qetag v0.2.1/go.mod h1:ZBpU2t+jg95ZsQ4ySWXTxMvlaEJeSn9+2AgOsKYK0tg=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=

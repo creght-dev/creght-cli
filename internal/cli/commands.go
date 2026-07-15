@@ -102,7 +102,8 @@ its parents and reuses its site_id.
 no-base. Conflict entries additionally carry "reason", "auto_mergeable"
 (whether creght pull would merge them without markers), "base_to_local_diff"
 and "base_to_remote_diff", so an agent can resolve without extra round-trips.
-With <path> it prints a line diff (remote vs local) of that one file.`),
+With <path> it prints a git-style unified diff (remote vs local, hunks with 3
+context lines) of that one file.`),
 		withExample(`  creght diff
   creght diff --json
   creght diff page/Index.tsx

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	udiff "github.com/aymanbagabas/go-udiff"
 )
 
 // splitFlagArgs separates positional arguments from flag arguments. Flags are
@@ -432,54 +434,11 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	return nil
 }
 
-// unifiedLineDiff produces a simple LCS-based interleaved line diff. Lines are
-// prefixed with "  " (context), "- " (only in a/remote) or "+ " (only in
-// b/local). No hunk compaction — kept minimal and easy for an agent to parse.
+// unifiedLineDiff produces a git-style unified diff: only hunks around changed
+// lines, with 3 lines of context and "@@ -a,b +c,d @@" headers, so a one-line
+// change in a long file prints a few lines instead of the whole file. The diff
+// itself comes from go-udiff, the diff implementation extracted from
+// x/tools (gopls).
 func unifiedLineDiff(aName string, bName string, a string, b string) string {
-	aLines := strings.Split(a, "\n")
-	bLines := strings.Split(b, "\n")
-	n, m := len(aLines), len(bLines)
-
-	// dp[i][j] = LCS length of aLines[i:] and bLines[j:]
-	dp := make([][]int, n+1)
-	for i := range dp {
-		dp[i] = make([]int, m+1)
-	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if aLines[i] == bLines[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
-			}
-		}
-	}
-
-	var sb strings.Builder
-	sb.WriteString("--- " + aName + "\n")
-	sb.WriteString("+++ " + bName + "\n")
-	i, j := 0, 0
-	for i < n && j < m {
-		switch {
-		case aLines[i] == bLines[j]:
-			sb.WriteString("  " + aLines[i] + "\n")
-			i++
-			j++
-		case dp[i+1][j] >= dp[i][j+1]:
-			sb.WriteString("- " + aLines[i] + "\n")
-			i++
-		default:
-			sb.WriteString("+ " + bLines[j] + "\n")
-			j++
-		}
-	}
-	for ; i < n; i++ {
-		sb.WriteString("- " + aLines[i] + "\n")
-	}
-	for ; j < m; j++ {
-		sb.WriteString("+ " + bLines[j] + "\n")
-	}
-	return sb.String()
+	return udiff.Unified(aName, bName, a, b)
 }

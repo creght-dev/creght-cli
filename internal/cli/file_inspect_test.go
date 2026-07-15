@@ -1,10 +1,94 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func numberedLines(n int) []string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line%d", i+1)
+	}
+	return lines
+}
+
+func countHunkHeaders(out string) int {
+	count := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "@@ -") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestUnifiedLineDiffOneLineChangeInLongFilePrintsOneHunk(t *testing.T) {
+	aLines := numberedLines(200)
+	a := strings.Join(aLines, "\n") + "\n"
+	bLines := append([]string{}, aLines...)
+	bLines[99] = "CHANGED"
+	b := strings.Join(bLines, "\n") + "\n"
+
+	out := unifiedLineDiff("remote:/x", "local:/x", a, b)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 11 {
+		t.Fatalf("got %d output lines, want 11 (2 headers + hunk header + 8 lines):\n%s", len(lines), out)
+	}
+	if lines[2] != "@@ -97,7 +97,7 @@" {
+		t.Fatalf("hunk header = %q, want @@ -97,7 +97,7 @@", lines[2])
+	}
+	if !strings.Contains(out, "-line100\n") || !strings.Contains(out, "+CHANGED\n") {
+		t.Fatalf("diff missing changed lines:\n%s", out)
+	}
+}
+
+func TestUnifiedLineDiffMergesNearbyChangesIntoOneHunk(t *testing.T) {
+	aLines := numberedLines(30)
+	a := strings.Join(aLines, "\n") + "\n"
+	bLines := append([]string{}, aLines...)
+	bLines[9] = "X"
+	bLines[13] = "Y"
+	b := strings.Join(bLines, "\n") + "\n"
+
+	out := unifiedLineDiff("a", "b", a, b)
+	if got := countHunkHeaders(out); got != 1 {
+		t.Fatalf("got %d hunks, want 1 (changes 3 unchanged lines apart merge):\n%s", got, out)
+	}
+}
+
+func TestUnifiedLineDiffSeparatesFarChangesIntoTwoHunks(t *testing.T) {
+	aLines := numberedLines(60)
+	a := strings.Join(aLines, "\n") + "\n"
+	bLines := append([]string{}, aLines...)
+	bLines[9] = "X"
+	bLines[49] = "Y"
+	b := strings.Join(bLines, "\n") + "\n"
+
+	out := unifiedLineDiff("a", "b", a, b)
+	if got := countHunkHeaders(out); got != 2 {
+		t.Fatalf("got %d hunks, want 2:\n%s", got, out)
+	}
+}
+
+func TestUnifiedLineDiffChangeAtFileStart(t *testing.T) {
+	aLines := numberedLines(10)
+	a := strings.Join(aLines, "\n") + "\n"
+	bLines := append([]string{}, aLines...)
+	bLines[0] = "X"
+	b := strings.Join(bLines, "\n") + "\n"
+
+	out := unifiedLineDiff("a", "b", a, b)
+	if !strings.Contains(out, "\n@@ -1,") {
+		t.Fatalf("hunk should start at line 1:\n%s", out)
+	}
+	if countHunkHeaders(out) != 1 {
+		t.Fatalf("want a single hunk:\n%s", out)
+	}
+}
 
 func chdir(t *testing.T, dir string) {
 	t.Helper()
