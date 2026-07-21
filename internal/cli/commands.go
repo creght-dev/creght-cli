@@ -163,6 +163,25 @@ inside the workspace.`),
 		withExample(`  creght cat page/Index.tsx
   creght cat page/Index.tsx --ref=local
   creght cat page/Index.tsx --site_id=<pid>/<sid>`)))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"importmap"}, "importmap", "Print a site's effective importMap (platform built-ins + talizen.config).", runImportMap, func(flags *pflag.FlagSet) {
+		addSiteIDFlag(flags)
+		flags.String("dir", ".", "Local Creght project directory.")
+		flags.String("ref", "remote", "Which config to read: remote | local.")
+	},
+		withLong(`Print the importMap that is actually in effect for a site: the platform
+built-in imports (from the render config) overlaid with the project's
+talizen.config importMap.imports, exactly how the renderer composes it.
+Config imports override built-ins with the same specifier.
+
+--ref remote (default) reads the live remote talizen.config; --ref local reads
+the workspace copy. Inside a pulled workspace, importmap discovers
+.creght/state.json like pull/push, so --site_id is optional there.
+
+Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
+| "<config path>"}} where sources records where each specifier came from.`),
+		withExample(`  creght importmap
+  creght importmap --ref=local
+  creght importmap --site_id=<pid>/<sid>`)))
 	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
