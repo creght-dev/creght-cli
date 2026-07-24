@@ -49,11 +49,15 @@ func isPathInside(root string, path string) bool {
 // (page/Index.tsx <-> /page/Index.tsx, backend/func/booking.ts <->
 // /backend/func/booking.ts).
 func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
-	if err := rejectLegacyFrontendLayout(root); err != nil {
-		return err
-	}
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil
+	}
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return err
+	}
+	if err := rejectLegacyFrontendLayout(root, ignore); err != nil {
+		return err
 	}
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -68,6 +72,13 @@ func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
 		if d.IsDir() {
 			return nil
 		}
+		remotePath, err := localPathToRemote(root, path)
+		if err != nil {
+			return err
+		}
+		if ignore.matches(remotePath) {
+			return nil
+		}
 		return fn(path)
 	})
 }
@@ -75,9 +86,46 @@ func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
 // rejectLegacyFrontendLayout errors on workspaces pulled by older CLI versions
 // that nested site files under frontend/; syncing those paths as-is would
 // create bogus remote /frontend/* files and delete the real remote files.
-func rejectLegacyFrontendLayout(root string) error {
-	info, err := os.Stat(filepath.Join(root, "frontend"))
-	if err == nil && info.IsDir() {
+func rejectLegacyFrontendLayout(root string, ignore *creghtIgnore) error {
+	frontendRoot := filepath.Join(root, "frontend")
+	info, err := os.Stat(frontendRoot)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	if ignore.matches("/frontend") || ignore.matches("/frontend/__creght_ignore_probe__") {
+		return nil
+	}
+
+	hasSyncableFile := false
+	hasFile := false
+	err = filepath.WalkDir(frontendRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if shouldSkipLocalPath(root, path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		hasFile = true
+		remotePath, err := localPathToRemote(root, path)
+		if err != nil {
+			return err
+		}
+		if !ignore.matches(remotePath) {
+			hasSyncableFile = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if hasSyncableFile || !hasFile {
 		return fmt.Errorf("workspace %s uses the legacy frontend/ layout; local paths now mirror remote site paths exactly. Move files out of frontend/ to the workspace root (frontend/page/Index.tsx -> page/Index.tsx) or re-pull into a fresh directory", root)
 	}
 	return nil
@@ -87,9 +135,13 @@ func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return err
+	}
 
 	for _, file := range files {
-		if file.IsDir {
+		if file.IsDir || ignore.matches(file.Path) {
 			continue
 		}
 
@@ -113,6 +165,13 @@ func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
 }
 
 func ensurePulledAgentsFile(root string, files []creght.File, projectID string, siteID string, editorURL string) (bool, error) {
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return false, err
+	}
+	if ignore.matches("/AGENTS.md") {
+		return false, nil
+	}
 	for _, file := range files {
 		if file.IsDir {
 			continue

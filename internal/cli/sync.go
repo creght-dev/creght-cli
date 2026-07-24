@@ -19,6 +19,7 @@ type Syncer struct {
 	siteID    string
 	dir       string
 	clientID  string
+	ignore    *creghtIgnore
 
 	mu           sync.Mutex
 	remoteByPath map[string]creght.File
@@ -41,6 +42,10 @@ func NewSyncer(client *creght.Client, projectID string, siteID string, dir strin
 	if err != nil {
 		return nil, fmt.Errorf("resolve sync dir: %w", err)
 	}
+	ignore, err := loadCreghtIgnore(absDir)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Syncer{
 		client:       client,
@@ -48,8 +53,21 @@ func NewSyncer(client *creght.Client, projectID string, siteID string, dir strin
 		siteID:       siteID,
 		dir:          absDir,
 		clientID:     newClientID(),
+		ignore:       ignore,
 		remoteByPath: map[string]creght.File{},
 	}, nil
+}
+
+func (s *Syncer) ensureIgnore() error {
+	if s.ignore != nil {
+		return nil
+	}
+	ignore, err := loadCreghtIgnore(s.dir)
+	if err != nil {
+		return err
+	}
+	s.ignore = ignore
+	return nil
 }
 
 func newClientID() string {
@@ -162,6 +180,10 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return syncPlanContext{}, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
 	}
+	if err := s.ensureIgnore(); err != nil {
+		return syncPlanContext{}, err
+	}
+	state.Files = filterIgnoredState(s.ignore, state.Files)
 
 	if err := s.refreshRemote(ctx); err != nil {
 		return syncPlanContext{}, err
@@ -195,6 +217,9 @@ func (s *Syncer) applyPlan(ctx context.Context, plan syncPlan) error {
 }
 
 func (s *Syncer) refreshRemote(ctx context.Context) error {
+	if err := s.ensureIgnore(); err != nil {
+		return err
+	}
 	files, err := s.client.GetFileList(ctx, s.projectID, s.siteID)
 	if err != nil {
 		return err
@@ -205,7 +230,7 @@ func (s *Syncer) refreshRemote(ctx context.Context) error {
 
 	s.remoteByPath = make(map[string]creght.File, len(files.List))
 	for _, file := range files.List {
-		if file.IsDir {
+		if file.IsDir || s.ignore.matches(file.Path) {
 			continue
 		}
 		s.remoteByPath[file.Path] = file
@@ -331,6 +356,9 @@ func (s *Syncer) saveLocalBaseState() error {
 }
 
 func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
+	if err := s.ensureIgnore(); err != nil {
+		return nil, err
+	}
 	var actions []localFileAction
 	localPaths := map[string]struct{}{}
 	err := walkWorkspaceFiles(s.dir, func(path string) error {
@@ -355,7 +383,7 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 
 	s.mu.Lock()
 	for remotePath, remote := range s.remoteByPath {
-		if remote.Readonly {
+		if remote.Readonly || s.ignore.matches(remotePath) {
 			continue
 		}
 		if _, existsLocally := localPaths[remotePath]; existsLocally {

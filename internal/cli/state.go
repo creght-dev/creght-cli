@@ -207,6 +207,11 @@ func findWorkspaceState(start string, searchParents bool) (string, workspaceStat
 }
 
 func saveWorkspaceState(root string, siteID string, files map[string]snapshotEntry) error {
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return err
+	}
+	files = filterIgnoredSnapshot(ignore, files)
 	state := workspaceState{
 		SiteID:    siteID,
 		UpdatedAt: time.Now().Format(time.RFC3339Nano),
@@ -243,6 +248,11 @@ func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
 	if !hasState || state.Files == nil {
 		state.Files = map[string]stateEntry{}
 	}
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return err
+	}
+	state.Files = filterIgnoredState(ignore, state.Files)
 	if strings.TrimSpace(state.SiteID) == "" {
 		state.SiteID = siteID
 	}

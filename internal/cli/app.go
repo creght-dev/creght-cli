@@ -263,13 +263,21 @@ func runPull(ctx context.Context, args []string) error {
 		return err
 	}
 
-	remoteSnap := remoteFileSnapshot(files.List)
+	remoteSnap, err := remoteFileSnapshotForWorkspace(*dir, files.List)
+	if err != nil {
+		return err
+	}
 	var outcome pullOutcome
 	if *force {
 		state, hasState, err := loadWorkspaceState(*dir)
 		if err != nil {
 			return err
 		}
+		ignore, err := loadCreghtIgnore(*dir)
+		if err != nil {
+			return err
+		}
+		state.Files = filterIgnoredState(ignore, state.Files)
 		localFiles, err := localFileSnapshot(*dir)
 		if err != nil {
 			return err
@@ -288,7 +296,7 @@ func runPull(ctx context.Context, args []string) error {
 		if err := saveWorkspaceState(*dir, projectID+"/"+realSiteID, remoteSnap); err != nil {
 			return err
 		}
-		outcome.changed = len(files.List)
+		outcome.changed = len(remoteSnap)
 	} else {
 		outcome, err = safePullWorkspace(*dir, projectID+"/"+realSiteID, remoteSnap)
 		if err != nil {
@@ -337,10 +345,16 @@ type pullOutcome struct {
 
 func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapshotEntry) (pullOutcome, error) {
 	var outcome pullOutcome
+	ignore, err := loadCreghtIgnore(root)
+	if err != nil {
+		return outcome, err
+	}
+	remoteFiles = filterIgnoredSnapshot(ignore, remoteFiles)
 	state, hasState, err := loadWorkspaceState(root)
 	if err != nil {
 		return outcome, err
 	}
+	state.Files = filterIgnoredState(ignore, state.Files)
 	if hasState && strings.TrimSpace(state.SiteID) != "" && state.SiteID != siteID {
 		return outcome, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, siteID)
 	}

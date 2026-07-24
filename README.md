@@ -158,6 +158,28 @@ paths starting with `/` are always workspace-root paths. When the discovered
 workspace root differs from the current directory, commands print
 `workspace: <root>` before doing anything.
 
+### Ignoring workspace files
+
+Add a `.creghtignore` file at the workspace root to exclude local and remote
+paths from `pull`, `diff`, and `push`. Ignored remote files are left untouched,
+including when using `push --delete` or `push --force`. The `.creghtignore`
+file itself is always local and is never synced.
+
+The syntax follows common gitignore conventions: blank lines, `#` comments,
+`!` negation, root-relative patterns, directory patterns, and `*`, `?`, and
+`**` wildcards. For example:
+
+```gitignore
+# Ignore generated files
+generated/*
+
+# Keep one generated file in sync
+!generated/keep.ts
+
+*.local.ts
+/scratch/
+```
+
 ## Local Vite Preview
 
 Creght projects pulled by the CLI usually do not have their own `package.json`

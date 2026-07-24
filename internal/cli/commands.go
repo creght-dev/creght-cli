@@ -85,7 +85,11 @@ changed on both sides are three-way merged against the base: non-overlapping
 edits merge automatically, overlapping edits write git-style conflict markers
 into the file (see creght resolve). Local content that pull overwrites is
 first backed up under .creght/backup/. --force skips merging and overwrites
-local with the remote copy.`),
+local with the remote copy.
+
+Paths matched by a workspace-root .creghtignore are not pulled. The ignore
+file supports gitignore-style comments, negation, and *, ?, and ** wildcards,
+and is itself never synced.`),
 		withExample(`  creght pull --site_id=<pid>/<sid> --dir=./mysite
   creght pull
   creght pull page/Index.tsx
@@ -119,6 +123,8 @@ diverged remote copies under .creght/backup/ first.
 
 With an optional <path> it pushes just that one file and updates only its base
 state (use --force to overwrite a remote copy that moved since the last pull).
+Paths matched by the workspace-root .creghtignore are not uploaded or deleted
+remotely; the ignore file itself is never synced.
 
 Without --dir, push discovers .creght/state.json from the current directory or
 its parents and reuses its site_id, so creght push works anywhere inside a

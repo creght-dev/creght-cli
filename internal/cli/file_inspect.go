@@ -159,6 +159,14 @@ func diffOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
+	ignore, err := loadCreghtIgnore(dir)
+	if err != nil {
+		return err
+	}
+	if ignore.matches(remotePath) {
+		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
+		return nil
+	}
 
 	client, _, err := clientFromConfig()
 	if err != nil {
@@ -276,6 +284,14 @@ func pullOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
+	ignore, err := loadCreghtIgnore(dir)
+	if err != nil {
+		return err
+	}
+	if ignore.matches(remotePath) {
+		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
+		return nil
+	}
 
 	client, _, err := clientFromConfig()
 	if err != nil {
@@ -285,7 +301,7 @@ func pullOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
-	remoteSnap := remoteFileSnapshot(files.List)
+	remoteSnap := filterIgnoredSnapshot(ignore, remoteFileSnapshot(files.List))
 	remoteEntry, ok := remoteSnap[remotePath]
 	if !ok {
 		return fmt.Errorf("remote file not found: %s", remotePath)
@@ -355,6 +371,14 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	remotePath, err := resolveWorkspacePath(dir, rawPath)
 	if err != nil {
 		return err
+	}
+	ignore, err := loadCreghtIgnore(dir)
+	if err != nil {
+		return err
+	}
+	if ignore.matches(remotePath) {
+		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
+		return nil
 	}
 
 	siteRef := projectID + "/" + realSiteID
