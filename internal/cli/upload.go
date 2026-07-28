@@ -76,7 +76,6 @@ func runUpload(ctx context.Context, args []string) error {
 		Mimetype:     resolvedMIME,
 		Size:         len(body),
 		From:         "user",
-		SourceURL:    *filePath,
 		CacheControl: strings.TrimSpace(*cacheControl),
 	})
 	if err != nil {
@@ -97,7 +96,9 @@ func runUpload(ctx context.Context, args []string) error {
 
 	if *jsonOut {
 		return printJSON(map[string]any{
-			"file_url": pre.FileURL,
+			"file_url":   pre.FileURL,
+			"file_path":  pre.FilePath,
+			"hash_exist": pre.HashExist,
 		})
 	}
 	if strings.TrimSpace(pre.FileURL) != "" {
@@ -122,8 +123,9 @@ Options:
   --json          Print upload metadata as JSON instead of only the public URL.
 
 The command uploads to the site's asset flow and prints the public file URL by
-default. The JSON output also includes site_path, a stable /_assets/... path that
-can be used from Creght site code.`)
+default. Use that URL directly from site code. The JSON output adds file_path
+(the storage path behind the URL) and hash_exist (true when the same content was
+already uploaded and only the record was created).`)
 }
 
 func detectMIMEType(path string, body []byte) string {

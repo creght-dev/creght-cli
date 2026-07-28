@@ -298,13 +298,15 @@ type IDResponse struct {
 	ID string `json:"id"`
 }
 
+// AssetPreUploadRequest omits source_url on purpose: the server stores it as the
+// remote origin an asset was fetched from, so a local file path has no meaning
+// there.
 type AssetPreUploadRequest struct {
 	FileName     string `json:"file_name"`
 	Hash         string `json:"hash"`
 	Mimetype     string `json:"mimetype"`
 	Size         int    `json:"size"`
 	From         string `json:"from,omitempty"`
-	SourceURL    string `json:"source_url,omitempty"`
 	CacheControl string `json:"cache_control,omitempty"`
 }
 
@@ -312,7 +314,6 @@ type AssetPreUploadResponse struct {
 	HashExist    bool   `json:"hash_exist"`
 	PresignedURL string `json:"presigned_url"`
 	FilePath     string `json:"file_path"`
-	SitePath     string `json:"site_path"`
 	FileURL      string `json:"file_url"`
 	ID           int64  `json:"id"`
 }

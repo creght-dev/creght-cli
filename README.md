@@ -553,9 +553,10 @@ Upload a local file through the Creght site asset flow:
 creght upload --site_id=<project_id>/<site_id> --file=./image.png
 ```
 
-The command prints the public file URL by default. Use `--json` to inspect the
-full upload metadata, including `site_path`, a stable `/_assets/...` path that
-can be used from Creght site code:
+The command prints the public file URL by default; use that URL directly from
+site code. Use `--json` to also get `file_path` (the storage path behind the URL)
+and `hash_exist` (true when the same content was already uploaded, so only the
+record was created):
 
 ```bash
 creght upload --site_id=<project_id>/<site_id> --file=./image.png --json
