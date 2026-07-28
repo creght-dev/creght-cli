@@ -207,7 +207,7 @@ This is a Creght project pulled by the Creght CLI.
 Before editing this project, read the Creght skill. If the skill is not installed,
 install it from this manual:
 
-https://github.com/creght/skills/blob/main/readme.md
+https://github.com/creght-dev/skills/blob/main/readme.md
 
 Project ID: %s
 Site ID: %s
