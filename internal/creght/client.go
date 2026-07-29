@@ -750,9 +750,10 @@ func (c *Client) DoSiteAction(ctx context.Context, projectID string, siteID stri
 }
 
 func (c *Client) PublishSite(ctx context.Context, projectID string, siteID string, note string) error {
-	path := fmt.Sprintf("/api/u/project/%s/site/%s/publish", url.PathEscape(projectID), url.PathEscape(siteID))
+	path := fmt.Sprintf("/api/u/project/%s/site/%s/publish/version", url.PathEscape(projectID), url.PathEscape(siteID))
 	body := map[string]any{
-		"note": strings.TrimSpace(note),
+		"version_id": 0,
+		"note":       strings.TrimSpace(note),
 	}
 
 	return c.do(ctx, http.MethodPost, path, nil, body, nil)
