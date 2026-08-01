@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -52,7 +53,13 @@ pulls remote site files (including Func code) into a local workspace with
 three-way merge, pushes local changes back to Creght, resolves conflicts,
 opens previews, and publishes sites.
 
-Current API host: %s`, helpAPIHost()),
+Current API host: %s
+Set a different one with the CREGHT_API_HOST environment variable, e.g.
+  CREGHT_API_HOST=http://localhost:8433 creght project list
+
+Credentials file: %s
+It stores one token per API host; creght logout removes the token for the
+current API host only.`, helpAPIHost(), helpConfigPath()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
@@ -215,6 +222,17 @@ func helpAPIHost() string {
 	}
 
 	return defaultAPIHost()
+}
+
+// helpConfigPath reports where the CLI keeps its saved login tokens, so
+// `creght -h` can point at the real file instead of a per-OS description.
+func helpConfigPath() string {
+	path, err := configPath()
+	if err != nil {
+		return filepath.Join("<user config dir>", "creght", "config.json")
+	}
+
+	return path
 }
 
 // cmdOpt customizes a command built by legacyCommand/siteFileCommand, so
