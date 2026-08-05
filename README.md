@@ -2,7 +2,7 @@
 
 Creght CLI is a thin local bridge for syncing site code between a local directory and Creght.
 
-The CLI can also run a local Vite preview for pulled Creght projects. Creght remains responsible for cloud rendering, CMS, assets, and the realtime preview environment.
+Creght remains responsible for cloud rendering, CMS, assets, and the preview environment. The CLI does not render sites locally; use `creght preview` to open the canonical remote preview.
 
 ## Install
 
@@ -180,54 +180,6 @@ generated/*
 /scratch/
 ```
 
-## Local Vite Preview
-
-Creght projects pulled by the CLI usually do not have their own `package.json`
-or `node_modules`. The local preview plugin therefore uses Vite only for local
-file serving and TSX transpilation; third-party packages continue to resolve
-through the Creght import map, matching the Web editor preview model. In
-`creght dev`, the CLI serves the workspace directory, loads the platform import
-map from server system info, and passes it to the Vite plugin; the plugin's
-local map is only a fallback.
-
-Install Vite in the local project folder:
-
-```bash
-cd ./mysite
-npm init -y
-npm install -D vite esbuild creght-cli
-```
-
-Create `vite.config.mjs`:
-
-```js
-import { defineConfig } from 'vite'
-import creght from 'creght-cli/vite'
-
-export default defineConfig({
-  plugins: [
-    creght({
-      apiHost: 'https://creght.cn',
-      projectId: '<project_id>',
-      // token: process.env.CREGHT_TOKEN,
-    }),
-  ],
-})
-```
-
-Run it:
-
-```bash
-npx vite --host 0.0.0.0
-```
-
-The plugin maps `/page/Index.tsx` to `/`, `/page/About.tsx` to `/about`, starts
-from the platform import map, merges `creght.config.ts` import-map entries,
-loads `/index.css` through the Tailwind browser runtime, proxies local `/api/*`
-requests to `apiHost`, calls page `getServerSideProps()` in the browser for a
-preview-only first render, and uses Vite HMR to re-import the current page
-module after local file changes without a full page reload.
-
 ## Push Local Changes
 
 Push the current local directory snapshot to Creght and exit:
@@ -287,57 +239,6 @@ content is backed up under `.creght/backup/<timestamp>-*/`.
 `creght diff --json` marks each conflict with `reason`, `auto_mergeable`, and
 `base_to_local_diff` / `base_to_remote_diff`, so agents can decide how to
 resolve without extra round-trips.
-
-## Local Web Editor Bidirectional Sync
-
-Run local files and the online Creght editor against the same cloud realtime
-files:
-
-```bash
-creght dev --site_id=<project_id>/<site_id> --dir=./mysite
-```
-
-For local backend or web development:
-
-```bash
-CREGHT_API_HOST=http://localhost:8433 creght dev --web=http://localhost:5173 --site_id=<project_id>/<site_id> --dir=./mysite
-```
-
-The command prints the online Web editor URL, pushes local file changes to
-Creght, and listens to the existing WebSocket collaboration channel so editor
-changes are written back to the local directory. MVP conflict handling is last
-write wins.
-
-`dev` also starts a local Vite preview by default:
-
-```text
-  VITE v8.0.14  ready in 529 ms
-  ➜  Local:   http://localhost:5173/
-Local Vite:  started (preferred http://localhost:5173; use the Vite Local URL above)
-```
-
-Use `--preview-port` or `--preview-host` to change the preferred local preview
-address. If that port is occupied, Vite uses its normal auto-port behavior and
-prints the actual URL in the terminal:
-
-```bash
-creght dev --site_id=<project_id>/<site_id> --dir=./mysite --preview-port=5174
-```
-
-Disable the local preview when you only want file sync:
-
-```bash
-creght dev --site_id=<project_id>/<site_id> --dir=./mysite --no-preview
-```
-
-The preview uses the bundled `creght-cli/vite` plugin. If the site directory
-has `node_modules/.bin/vite`, that local Vite is used; otherwise the CLI starts
-a hidden temporary Vite runtime under `.creght/` and installs `vite` plus
-`esbuild` there.
-
-Local file changes are pushed through Vite HMR as a React root re-render. This
-avoids a browser-level refresh, but it is not yet full React Fast Refresh and
-does not guarantee component state preservation.
 
 ## Open Preview
 
@@ -508,8 +409,7 @@ The workflow is the same as for any site file:
 
 1. Run `creght pull --site_id=<project_id>/<site_id> --dir=./mysite`.
 2. Edit or create files under `./mysite/backend/func/`.
-3. Run `creght push --site_id=<project_id>/<site_id> --dir=./mysite`, or keep
-   `creght dev` running.
+3. Run `creght push --site_id=<project_id>/<site_id> --dir=./mysite`.
 
 Examples:
 
@@ -552,7 +452,7 @@ The output matches the Func HTTP response protocol: successful runs print
 top-level `ok` execution wrapper.
 
 There are no `creght func list/get/create/update/delete` commands. Manage Func
-code by editing `backend/func` files and syncing them with pull/push/dev
+code by editing `backend/func` files and syncing them with pull/push
 like any other site file; `func run` only runs sample input.
 
 ## Upload Assets
@@ -604,8 +504,7 @@ with three-way merge, push local files back to Creght, resolve conflicts, open
 the remote preview, and publish a site.
 
 The CLI commands still use the Creght backend and web app for the canonical
-preview. The Vite plugin is a local development helper and intentionally does
-not implement full production SSR.
+preview. The CLI does not render sites locally.
 
 ```bash
 creght login [--web=https://creght.cn]
@@ -614,7 +513,6 @@ creght project list
 creght pull --site_id=<project_id>/<site_id> --dir=./mysite
 creght push --site_id=<project_id>/<site_id> --dir=./mysite
 creght resolve --list
-creght dev --site_id=<project_id>/<site_id> --dir=./mysite [--web=https://creght.cn]
 creght preview --site_id=<project_id>/<site_id>
 creght publish --site_id=<project_id>/<site_id> [--note=<note>]
 creght cms collections --site_id=<project_id>/<site_id>
@@ -638,14 +536,13 @@ Command meanings:
 - `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
 - `resolve`: List files with conflict markers, or resolve one by keeping the local (`--ours`) or remote (`--theirs`) side.
-- `dev`: Bidirectionally sync local files with cloud realtime files and the online Web editor.
 - `preview`: Open the remote preview URL for a site in the browser.
 - `publish`: Publish a site to make the current remote site version live.
 - `cms`: Manage CMS collections.
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
 - `table`: Manage project JSON tables and records used by Func.
-- `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push/dev.
+- `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
 - `version`: Print the installed CLI version.
 

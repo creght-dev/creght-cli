@@ -14,12 +14,6 @@
   "bin": {
     "creght": "bin/creght.js"
   },
-  "exports": {
-    "./vite": {
-      "types": "./vite/index.d.ts",
-      "import": "./vite/index.js"
-    }
-  },
   "scripts": {
     "prepare:npm-binaries": "node scripts/prepare-npm-binaries.js",
     "test:npm": "node scripts/install.js --check"
@@ -27,24 +21,11 @@
   "files": [
     "bin/",
     "scripts/",
-    "vite/",
     "vendor/",
     "README.md"
   ],
   "engines": {
     "node": ">=18"
-  },
-  "peerDependencies": {
-    "esbuild": ">=0.20",
-    "vite": ">=5"
-  },
-  "peerDependenciesMeta": {
-    "esbuild": {
-      "optional": true
-    },
-    "vite": {
-      "optional": true
-    }
   },
   "os": [
     "darwin",

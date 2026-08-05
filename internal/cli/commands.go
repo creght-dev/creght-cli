@@ -195,7 +195,6 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 		withExample(`  creght importmap
   creght importmap --ref=local
   creght importmap --site_id=<pid>/<sid>`)))
-	root.AddCommand(devCommand(ctx, rawArgs))
 	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
 	root.AddCommand(publishCommand(ctx, rawArgs))
 	root.AddCommand(cmsCommand(ctx, rawArgs))
@@ -324,17 +323,6 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 			flags.Bool("json", false, "Output the change plan as machine-readable JSON.")
 		}
 	}, opts...)
-}
-
-func devCommand(ctx context.Context, rawArgs []string) *cobra.Command {
-	return legacyCommand(ctx, rawArgs, []string{"dev"}, "dev", "Bidirectionally sync local files with the Web editor and run Vite preview.", runDev, func(flags *pflag.FlagSet) {
-		flags.String("web", "", "Creght web host.")
-		addSiteIDFlag(flags)
-		flags.String("dir", ".", "Local Creght project directory.")
-		flags.Bool("no-preview", false, "Do not start a local Vite preview.")
-		flags.String("preview-host", "localhost", "Local Vite preview host.")
-		flags.Int("preview-port", 5173, "Preferred local Vite preview port.")
-	})
 }
 
 func publishCommand(ctx context.Context, rawArgs []string) *cobra.Command {

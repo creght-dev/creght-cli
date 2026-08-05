@@ -7,8 +7,6 @@ require (
 	github.com/br41n10/qetag v0.2.1
 	github.com/dop251/goja v0.0.0-20260721123636-c65cf2f023c8
 	github.com/evanw/esbuild v0.28.1
-	github.com/fsnotify/fsnotify v1.9.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
@@ -16,6 +14,7 @@ require (
 
 require (
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
