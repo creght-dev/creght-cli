@@ -609,11 +609,19 @@ func runPublish(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if err := client.PublishSite(ctx, projectID, realSiteID, *note); err != nil {
+	result, err := client.PublishSite(ctx, projectID, realSiteID, *note)
+	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Published %s/%s\n", projectID, realSiteID)
+	if result.VersionID != 0 {
+		if len(result.Targets) > 0 {
+			fmt.Printf("%s is live on %s\n", versionLabel(result.VersionNo, result.VersionID), strings.Join(result.Targets, ", "))
+		} else {
+			fmt.Printf("%s is live\n", versionLabel(result.VersionNo, result.VersionID))
+		}
+	}
 	return nil
 }
 

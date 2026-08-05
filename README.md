@@ -274,6 +274,96 @@ For local development:
 CREGHT_API_HOST=http://localhost:8433 creght publish --site_id=<project_id>/<site_id>
 ```
 
+`publish` reports the version it created, so you can publish it again later:
+
+```text
+Published <project_id>/<site_id>
+version 14 (id 458) is live on demo.creght.cn
+```
+
+## Site Versions
+
+A site version is an immutable snapshot of the site's source files — the
+platform equivalent of a git commit. Create one whenever a piece of work is
+done, then publish whichever version you want the live site to serve.
+
+Snapshots cover source files only. CMS content and the platform state under
+`/platform/**` (CMS/form/table/auth definitions) are live, so publishing an
+older version does not roll those back.
+
+Inside a pulled workspace `--site_id` is optional; the version commands
+discover `.creght/state.json` from the current directory or its parents, like
+`pull`/`push` do.
+
+Snapshot the current site source without publishing it:
+
+```bash
+creght version create --note="Add pricing page"
+```
+
+A version records the *remote* files, so local edits that were never pushed
+would be missing from it. `create` therefore compares the workspace against the
+site first and refuses to run while anything is unpushed:
+
+```text
+update /page/Index.tsx
+1 change is not pushed yet and would be missing from this version; run creght
+push first, or pass --allow-dirty to snapshot the remote site as it is
+```
+
+Run `creght push` first, or pass `--allow-dirty` to snapshot the remote site as
+it is. The platform rejects a snapshot identical to the newest version, so
+repeated `create` calls never pile up duplicates.
+
+List versions, newest first:
+
+```bash
+creght version list
+```
+
+```text
+   VERSION  ID   CREATED           FROM                  NOTE
+   12       456  2026-08-05 14:31  api_generate_version  Add pricing page
+*  11       455  2026-08-05 11:02  publish               Fix nav
+   10       442  2026-08-04 18:40  agent                 -
+* live: version 11 (id 455), served by demo.creght.cn
+pinned: www.example.com -> version 12 (id 456)
+1 change is pending on the site since the newest version; run creght version create to snapshot them
+```
+
+`*` marks the version the live site serves. `VERSION` is the per-site number
+that `version publish` takes; `ID` is the platform-wide version id. Use
+`--limit=<n>` to shorten the list and `--json` to get the raw publish state,
+including every version, the pinned domains, and the exact files that changed
+since the newest version.
+
+Make an existing version live, forward to a newer one or back to an older one:
+
+```bash
+creght version publish 12
+creght version publish 12 --note="Roll back nav change"
+```
+
+Every domain follows it except domains pinned to a specific version.
+Publishing the version already being served is a no-op that just refreshes its
+caches.
+
+Publishing a version changes only which snapshot the live site serves — it
+restores nothing. The editable site workspace and your local files are
+untouched, and `creght pull` still fetches the current workspace rather than the
+published version's files. So after rolling production back to an older version,
+the workspace still holds the newer source and the next `publish` would ship it
+again; to revert the code itself, edit locally and push.
+
+`12` is the per-site number from the `VERSION` column. To reach a version older
+than the window `version list` returns, select it by id instead:
+
+```bash
+creght version publish id:456
+```
+
+Bare `creght version` still prints the installed CLI version.
+
 ## Manage CMS Collections
 
 List CMS collections:
@@ -503,6 +593,9 @@ Creght, list projects and sites, pull remote site files into a local directory
 with three-way merge, push local files back to Creght, resolve conflicts, open
 the remote preview, and publish a site.
 
+It can also manage site versions: immutable snapshots of a site's source files,
+created and published like git commits.
+
 The CLI commands still use the Creght backend and web app for the canonical
 preview. The CLI does not render sites locally.
 
@@ -526,6 +619,9 @@ creght table record create --site_id=<project_id>/<site_id> --table=<key> --data
 creght func run --site_id=<project_id>/<site_id> --key=<key.method> --input=./input.json
 creght upload --site_id=<project_id>/<site_id> --file=./image.png
 creght version
+creght version create [--note=<note>] [--allow-dirty]
+creght version list [--limit=<n>] [--json]
+creght version publish <version_no> [--note=<note>]
 ```
 
 Command meanings:
@@ -537,14 +633,14 @@ Command meanings:
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
 - `resolve`: List files with conflict markers, or resolve one by keeping the local (`--ours`) or remote (`--theirs`) side.
 - `preview`: Open the remote preview URL for a site in the browser.
-- `publish`: Publish a site to make the current remote site version live.
+- `publish`: Snapshot the current remote site source into a new version and make it live in one step.
 - `cms`: Manage CMS collections.
 - `content`: Manage CMS content entries.
 - `form`: Manage forms and form submissions.
 - `table`: Manage project JSON tables and records used by Func.
 - `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
-- `version`: Print the installed CLI version.
+- `version`: Print the installed CLI version. Subcommands manage site versions — immutable source snapshots: `version create` records one, `version list` shows them and which is live, `version publish` makes one live.
 
 ## Release
 

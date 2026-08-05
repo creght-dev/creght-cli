@@ -771,14 +771,140 @@ func (c *Client) DoSiteAction(ctx context.Context, projectID string, siteID stri
 	return ret, nil
 }
 
-func (c *Client) PublishSite(ctx context.Context, projectID string, siteID string, note string) error {
-	path := fmt.Sprintf("/api/u/project/%s/site/%s/publish/version", url.PathEscape(projectID), url.PathEscape(siteID))
-	body := map[string]any{
-		"version_id": 0,
-		"note":       strings.TrimSpace(note),
+// SiteVersion is one immutable snapshot of a site's source files — the platform
+// equivalent of a git commit. VersionNo is the per-site number shown in the
+// editor; ID is what the publish API takes.
+//
+// Snapshots cover source files only. CMS content and the platform state under
+// /platform/** are live, so they are neither captured nor restored.
+type SiteVersion struct {
+	ID        int64     `json:"id"`
+	VersionNo int64     `json:"version_no"`
+	Note      string    `json:"note"`
+	From      string    `json:"from"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// SitePublishDomain describes one hostname in the publish panel. Follow means
+// the domain has no pinned version, so it moves with the site default version.
+type SitePublishDomain struct {
+	ID               int64  `json:"id"`
+	Domain           string `json:"domain"`
+	System           bool   `json:"system"`
+	PublishVersionID int64  `json:"publish_version_id"`
+	PublishVersionNo int64  `json:"publish_version_no"`
+	Follow           bool   `json:"follow"`
+}
+
+// SiteFileChange is one file that differs between the remote editable workspace
+// and the newest version. ChangeAction is create | update | delete.
+type SiteFileChange struct {
+	Path         string `json:"path"`
+	ChangeAction string `json:"change_action"`
+}
+
+// SitePublishState is the whole version/publish picture for a site: the recent
+// versions, which one is live, and whether the remote workspace has drifted
+// from the newest version.
+type SitePublishState struct {
+	Versions []SiteVersion `json:"versions"`
+	// CurrentVersionID is the site default version, i.e. the one served by every
+	// domain that is not pinned to a specific version.
+	CurrentVersionID int64               `json:"current_version_id"`
+	CurrentVersionNo int64               `json:"current_version_no"`
+	SystemDomain     string              `json:"system_domain"`
+	Domains          []SitePublishDomain `json:"domains"`
+	PublishTargets   []string            `json:"publish_targets"`
+	HasChanges       bool                `json:"has_changes"`
+	WorkspaceChanges []SiteFileChange    `json:"workspace_changes,omitempty"`
+}
+
+// FindVersionByNo resolves a per-site version number to its version, searching
+// only the versions this state carries.
+func (s SitePublishState) FindVersionByNo(versionNo int64) (SiteVersion, bool) {
+	for _, version := range s.Versions {
+		if version.VersionNo == versionNo {
+			return version, true
+		}
+	}
+	return SiteVersion{}, false
+}
+
+// FindVersionByID resolves a version id to its version, searching only the
+// versions this state carries.
+func (s SitePublishState) FindVersionByID(versionID int64) (SiteVersion, bool) {
+	for _, version := range s.Versions {
+		if version.ID == versionID {
+			return version, true
+		}
+	}
+	return SiteVersion{}, false
+}
+
+// PublishVersionResult reports what a create/publish call did. Changed is false
+// when the requested version was already the live one, which is a no-op.
+type PublishVersionResult struct {
+	VersionID int64    `json:"version_id"`
+	VersionNo int64    `json:"version_no"`
+	Created   bool     `json:"created"`
+	Published bool     `json:"published"`
+	Changed   bool     `json:"changed"`
+	Targets   []string `json:"targets"`
+}
+
+func (c *Client) GetSitePublishState(ctx context.Context, projectID string, siteID string) (SitePublishState, error) {
+	var ret SitePublishState
+	path := fmt.Sprintf("/api/u/project/%s/site/%s/publish/state", url.PathEscape(projectID), url.PathEscape(siteID))
+	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
+	if err != nil {
+		return SitePublishState{}, err
 	}
 
-	return c.do(ctx, http.MethodPost, path, nil, body, nil)
+	return ret, nil
+}
+
+// CreateSiteVersion snapshots the remote workspace into a new version without
+// touching the live site. The server rejects it when the workspace is identical
+// to the newest version, so versions never duplicate.
+func (c *Client) CreateSiteVersion(ctx context.Context, projectID string, siteID string, note string) (PublishVersionResult, error) {
+	return c.postPublishVersion(ctx, projectID, siteID, map[string]any{
+		"version_id":  0,
+		"note":        strings.TrimSpace(note),
+		"create_only": true,
+	})
+}
+
+// PublishSiteVersion points the live site at an existing version. Domains pinned
+// to another version do not move.
+func (c *Client) PublishSiteVersion(ctx context.Context, projectID string, siteID string, versionID int64, note string) (PublishVersionResult, error) {
+	if versionID <= 0 {
+		return PublishVersionResult{}, fmt.Errorf("version id must be positive")
+	}
+
+	return c.postPublishVersion(ctx, projectID, siteID, map[string]any{
+		"version_id": versionID,
+		"note":       strings.TrimSpace(note),
+	})
+}
+
+// PublishSite snapshots the remote workspace into a new version and publishes
+// it in one step (version_id 0 means "create from the workspace first").
+func (c *Client) PublishSite(ctx context.Context, projectID string, siteID string, note string) (PublishVersionResult, error) {
+	return c.postPublishVersion(ctx, projectID, siteID, map[string]any{
+		"version_id": 0,
+		"note":       strings.TrimSpace(note),
+	})
+}
+
+func (c *Client) postPublishVersion(ctx context.Context, projectID string, siteID string, body map[string]any) (PublishVersionResult, error) {
+	var ret PublishVersionResult
+	path := fmt.Sprintf("/api/u/project/%s/site/%s/publish/version", url.PathEscape(projectID), url.PathEscape(siteID))
+	err := c.do(ctx, http.MethodPost, path, nil, body, &ret)
+	if err != nil {
+		return PublishVersionResult{}, err
+	}
+
+	return ret, nil
 }
 
 func StringPtr(v string) *string {

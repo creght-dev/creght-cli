@@ -203,15 +203,93 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 	root.AddCommand(tableCommand(ctx, rawArgs))
 	root.AddCommand(funcCommand(ctx, rawArgs))
 	root.AddCommand(uploadCommand(ctx, rawArgs))
-	root.AddCommand(&cobra.Command{
+	root.AddCommand(versionCommand(ctx, rawArgs))
+
+	return root
+}
+
+// versionCommand keeps bare `creght version` printing the CLI version, and hangs
+// the site-version subcommands off it.
+func versionCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "version",
-		Short: "Print the installed CLI version.",
+		Short: "Print the installed CLI version, or manage site versions.",
+		Long: strings.TrimSpace(`Without a subcommand, print the installed CLI version.
+
+The subcommands manage site versions: immutable snapshots of a site's source
+files, the platform equivalent of a git commit. Create one whenever a piece of
+work is done, then publish the one you want the live site to serve.
+
+A snapshot covers source files only. CMS content and the platform state under
+/platform/** (CMS/form/table/auth definitions) are live, so publishing an older
+version does not roll those back.
+
+Inside a pulled workspace --site_id is optional; these commands discover
+.creght/state.json from the current directory or its parents like pull/push do.`),
+		Example: strings.TrimSpace(`  creght version
+  creght version create --note="Add pricing page"
+  creght version list
+  creght version publish 12`),
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
-	})
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "create", "Snapshot the remote site source into a new version, without publishing it.", runVersion, addVersionCreateFlags,
+		withLong(`Snapshot the site's current remote source files into a new immutable version
+and leave the live site untouched. This is the "commit" step: run it whenever a
+piece of work is finished, then publish the version when you want it served.
 
-	return root
+A version records the remote workspace, so local edits that were never pushed
+would be missing from it. Inside a pulled workspace create therefore compares
+local files against the site first and refuses to run while anything is
+unpushed, listing what to push. --allow-dirty skips that check and snapshots
+the remote site as it is.
+
+The platform rejects a snapshot identical to the newest version, so repeated
+creates never pile up duplicates.`),
+		withExample(`  creght version create --note="Add pricing page"
+  creght version create --note="Checkpoint" --allow-dirty
+  creght version create --site_id=<pid>/<sid> --note="Add pricing page"`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "list", "List site versions, newest first, and show which one is live.", runVersion, addVersionListFlags,
+		withLong(`List the site's recent versions, newest first. A * marks the version the live
+site currently serves; the footer names the hostnames serving it and any domain
+pinned to a different version.
+
+The VERSION column is the per-site number that creght version publish takes;
+ID is the platform-wide version id. When the site's source has changed since the
+newest version, the footer says so — run creght version create to capture it.
+
+--json prints the raw publish state, including every version, the live version
+id, the pinned domains, and the exact files that changed since the newest
+version.`),
+		withExample(`  creght version list
+  creght version list --limit=10
+  creght version list --json`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "publish <version_no>", "Make an existing site version the live one.", runVersion, addVersionPublishFlags,
+		withLong(`Point the live site at an existing version, forward to a newer one or back to
+an older one. Every domain follows it except domains pinned to a specific
+version.
+
+<version_no> is the per-site number from the VERSION column of creght version
+list. Pass id:<version_id> instead to select a version by id, which is how to
+reach versions older than the window list returns.
+
+Publishing the version already being served is a no-op that just refreshes its
+caches.
+
+This changes only which snapshot the live site serves. It restores nothing: the
+editable site workspace and your local files are untouched, and creght pull
+still fetches the current workspace rather than the published version's files.
+So after rolling production back, the workspace still holds the newer source and
+the next publish would ship it again — to revert the code itself, edit locally
+and push. CMS content and /platform/** definitions are live and never move with
+a version either.
+
+To snapshot the current source and publish it in one step, use creght publish.`),
+		withExample(`  creght version publish 12
+  creght version publish 12 --note="Roll back nav change"
+  creght version publish id:456`)))
+	return cmd
 }
 
 func helpAPIHost() string {
@@ -486,6 +564,35 @@ func funcCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 
 func addSiteIDFlag(flags *pflag.FlagSet) {
 	flags.String("site_id", "", "Site reference in <project_id>/<site_id> format.")
+}
+
+// addVersionSiteFlags mirrors pull/push so site-version commands can be run from
+// inside a pulled workspace without repeating --site_id.
+func addVersionSiteFlags(flags *pflag.FlagSet) {
+	flags.String("site_id", "", "Site reference in <project_id>/<site_id> format. Optional inside a pulled workspace.")
+	flags.String("dir", ".", "Local Creght project directory.")
+}
+
+func addVersionCreateFlags(flags *pflag.FlagSet) {
+	addVersionSiteFlags(flags)
+	flags.String("note", "", "Note describing what this version contains.")
+	flags.Bool("allow-dirty", false, "Snapshot the remote site even when local changes are unpushed.")
+	flags.Bool("json", false, "Print the created version as JSON.")
+}
+
+func addVersionListFlags(flags *pflag.FlagSet) {
+	addVersionSiteFlags(flags)
+	flags.Int("limit", 0, "Max versions to print. 0 prints every version returned.")
+	flags.Bool("json", false, "Print the raw publish state as JSON.")
+}
+
+// addVersionPublishFlags deliberately has no --version flag: the root command
+// treats a bare --version anywhere in the args as "print the CLI version", which
+// would swallow it. The version to publish is a positional argument instead.
+func addVersionPublishFlags(flags *pflag.FlagSet) {
+	addVersionSiteFlags(flags)
+	flags.String("note", "", "Optional publish note.")
+	flags.Bool("json", false, "Print the publish result as JSON.")
 }
 
 func addProjectCreateFlags(flags *pflag.FlagSet) {
