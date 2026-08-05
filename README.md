@@ -428,10 +428,14 @@ Top-level `slug` and `sort` are optional; the `--slug` / `--sort` flags override
 
 ```bash
 creght content create --site_id=<project_id>/<site_id> --collection=prompts --data=./content.json --slug=typography-v02
-creght content update --site_id=<project_id>/<site_id> --collection=prompts --id=<content_id> --data=./content.json --sort=15
+creght content update --site_id=<project_id>/<site_id> --collection=prompts --id=<content_id> --sort=15
 ```
 
-`sort` controls the order editors see in the CMS list — bigger shows first, and `0` is a real value rather than "unset". When neither the flag nor the file sets it, the request omits `sort` entirely: `create` takes the platform default (appended last) and `update` leaves the entry's current sort alone. Use `content update --sort` to reorder; deleting and recreating an entry changes its id, and site versions do not snapshot CMS content, so that cannot be undone.
+`update` applies a partial update, so `--data` is optional there — pass `--slug` / `--sort` alone to rename or reorder without re-submitting the body, as in the command above. `create` still requires `--data`.
+
+`sort` controls the order editors see in the CMS list, bigger first. Omitting it lets `create` append the entry last and leaves `update`'s current value alone. Use `content update --sort` to reorder; deleting and recreating an entry changes its id, and site versions do not snapshot CMS content, so that cannot be undone.
+
+One asymmetry worth knowing: the platform reads a zero `sort` on **create** as "auto-assign, append last", so a literal `0` cannot be created — `create --sort=0` appends. `update --sort=0` does store a real 0.
 
 ## Manage Forms
 
@@ -487,8 +491,10 @@ creght table record delete --site_id=<project_id>/<site_id> --table=appointments
 
 `record update` sends a patch body to the backend. Existing fields are merged,
 and a `null` field value removes that field. Both `create` and `update` accept
-`--sort=<n>` with the same semantics as content sort: `0` is a real value, and
-omitting the flag leaves `sort` out of the request instead of zeroing it.
+`--sort=<n>`; omitting the flag leaves `sort` out of the request instead of
+zeroing it. Unlike content, a record's `sort` cannot be set to `0` — the platform
+ignores a zero sort on record update, so `--sort=0` is rejected there rather than
+silently doing nothing, and on `create` it means "append last".
 
 ## Func Backend Code As Files
 

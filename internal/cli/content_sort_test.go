@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bysir/creght-cli/internal/creght"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,8 +101,9 @@ func TestRunContentCreateKeepsSortFromDataFile(t *testing.T) {
 	}
 }
 
-// 显式 --sort=0 是一个真实排序值，必须出现在请求体里，不能被 omitempty 吞掉。
-func TestRunContentUpdateSendsExplicitZeroSort(t *testing.T) {
+// 显式 --sort=0 必须以哨兵值上线：服务端按非空字段算更新列，裸的 0 会被当成
+// “没传 sort”而忽略，只有哨兵值会被翻译回真正的 0。
+func TestRunContentUpdateSendsZeroSortAsSentinel(t *testing.T) {
 	setupTestConfig(t)
 	dataPath := writeContentFile(t, `{"sort":15,"body":{"title":"Hi"}}`)
 
@@ -125,8 +128,86 @@ func TestRunContentUpdateSendsExplicitZeroSort(t *testing.T) {
 	if !ok {
 		t.Fatalf("sort key missing from request body: %#v", got)
 	}
-	if raw != float64(0) {
-		t.Fatalf("sort = %#v, want 0", raw)
+	if raw != float64(creght.EmptyNumberSentinel) {
+		t.Fatalf("sort = %#v, want sentinel %d", raw, creght.EmptyNumberSentinel)
+	}
+}
+
+// create 侧不能用哨兵：服务端 create 不做哨兵翻译，会把魔数原样写进库。
+// 显式 --sort=0 在 create 上等于“让服务端自动追加到末尾”，即不带该字段，
+// 并且要盖掉 --data 里的 sort。
+func TestRunContentCreateZeroSortOmitsFieldInsteadOfSentinel(t *testing.T) {
+	setupTestConfig(t)
+	dataPath := writeContentFile(t, `{"sort":15,"body":{"title":"Hi"}}`)
+
+	var got map[string]any
+	server := contentSortServer(t, http.MethodPost, &got)
+	defer server.Close()
+	t.Setenv("CREGHT_API_HOST", server.URL)
+
+	captureStdout(t, func() {
+		if err := runContentCreate(context.Background(), []string{
+			"--site_id=project-1/site-1",
+			"--collection=posts",
+			"--data=" + dataPath,
+			"--sort=0",
+		}); err != nil {
+			t.Fatalf("runContentCreate: %v", err)
+		}
+	})
+
+	if raw, ok := got["sort"]; ok {
+		t.Fatalf("sort should be absent on create --sort=0, got %#v", raw)
+	}
+}
+
+// update 是局部更新，--data 可省略：只改 sort 时不必把整个 body 重新提交。
+func TestRunContentUpdateWithoutDataFile(t *testing.T) {
+	setupTestConfig(t)
+
+	var got map[string]any
+	server := contentSortServer(t, http.MethodPut, &got)
+	defer server.Close()
+	t.Setenv("CREGHT_API_HOST", server.URL)
+
+	captureStdout(t, func() {
+		if err := runContentUpdate(context.Background(), []string{
+			"--site_id=project-1/site-1",
+			"--collection=posts",
+			"--id=content-1",
+			"--sort=15",
+		}); err != nil {
+			t.Fatalf("runContentUpdate: %v", err)
+		}
+	})
+
+	if got["sort"] != float64(15) {
+		t.Fatalf("sort = %#v, want 15", got["sort"])
+	}
+	if got["id"] != "content-1" {
+		t.Fatalf("id = %#v, want content-1", got["id"])
+	}
+	if _, ok := got["body"]; ok {
+		t.Fatalf("body should be absent when --data is omitted, got %#v", got["body"])
+	}
+}
+
+// --data/--slug/--sort 全都没给时，提交的是空 patch，服务端只会回
+// "no fields were updated"。提前报错比让用户去猜那个响应更有用。
+func TestRunContentUpdateRequiresSomethingToChange(t *testing.T) {
+	setupTestConfig(t)
+	t.Setenv("CREGHT_API_HOST", "http://127.0.0.1:1")
+
+	err := runContentUpdate(context.Background(), []string{
+		"--site_id=project-1/site-1",
+		"--collection=posts",
+		"--id=content-1",
+	})
+	if err == nil {
+		t.Fatal("expected an error when nothing was passed to change")
+	}
+	if !strings.Contains(err.Error(), "--data, --slug, or --sort") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -157,7 +238,8 @@ func TestRunContentUpdateOmitsUnsetSort(t *testing.T) {
 	}
 }
 
-// table record 侧同款：--sort=0 不能被丢弃，不传则不带该字段。
+// table record create：非零值照发，0 等于“自动追加到末尾”（服务端 create 用
+// sort==0 触发 max+10），不传同样不带该字段。
 func TestRunTableRecordCreateSortFlagSemantics(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -165,7 +247,7 @@ func TestRunTableRecordCreateSortFlagSemantics(t *testing.T) {
 		wantSort any
 		wantKey  bool
 	}{
-		{name: "explicit zero", args: []string{"--sort=0"}, wantSort: float64(0), wantKey: true},
+		{name: "explicit zero means append last", args: []string{"--sort=0"}, wantKey: false},
 		{name: "explicit value", args: []string{"--sort=7"}, wantSort: float64(7), wantKey: true},
 		{name: "unset", args: nil, wantKey: false},
 	} {
@@ -213,5 +295,30 @@ func TestRunTableRecordCreateSortFlagSemantics(t *testing.T) {
 				t.Fatalf("sort = %#v, want %#v", raw, tc.wantSort)
 			}
 		})
+	}
+}
+
+// 记录更新没有 content 那套哨兵翻译，sort:0 会被服务端忽略、哨兵又会被原样入库，
+// 所以这里应该显式报错而不是静默无操作。
+func TestRunTableRecordUpdateRejectsZeroSort(t *testing.T) {
+	setupTestConfig(t)
+	dataPath := filepath.Join(t.TempDir(), "record.json")
+	if err := os.WriteFile(dataPath, []byte(`{"name":"Ada"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREGHT_API_HOST", "http://127.0.0.1:1")
+
+	err := runTableRecordUpdate(context.Background(), []string{
+		"--site_id=project-1/site-1",
+		"--table=appointments",
+		"--id=record-1",
+		"--data=" + dataPath,
+		"--sort=0",
+	})
+	if err == nil {
+		t.Fatal("expected --sort=0 to be rejected for table record update")
+	}
+	if !strings.Contains(err.Error(), "--sort=0 is not supported") {
+		t.Fatalf("error = %v", err)
 	}
 }

@@ -48,14 +48,17 @@ Usage:
   creght table delete --site_id=<project_id>/<site_id> (--id=<id> | --key=<key>)
   creght table record list --site_id=<project_id>/<site_id> --table=<key-or-id> [--where=./where.json] [--filter=./filter.json]
   creght table record get --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id> [--out=./record.json]
-  creght table record create --site_id=<project_id>/<site_id> --table=<key-or-id> --data=./record.json [--sort=0]
-  creght table record update --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id> --data=./patch.json [--sort=0]
+  creght table record create --site_id=<project_id>/<site_id> --table=<key-or-id> --data=./record.json [--sort=<n>]
+  creght table record update --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id> --data=./patch.json [--sort=<n>]
   creght table record delete --site_id=<project_id>/<site_id> --table=<key-or-id> --id=<record_id>
 
 Notes:
   Tables are project JSON tables used by Func ctx.db.*. --schema may be either
   a raw JSON Schema object or a full table object with key, name, desc, and
-  json_schema fields. Record update merges the JSON body; null removes fields.`)
+  json_schema fields. Record update merges the JSON body; null removes fields.
+  --sort takes a non-zero value (bigger first). Omitting it on create appends
+  the record last, which is also what --sort=0 means; a record sort cannot be
+  set to 0, so --sort=0 on update is rejected instead of silently doing nothing.`)
 }
 
 func runTableList(ctx context.Context, args []string) error {
@@ -360,7 +363,9 @@ func runTableRecordCreate(ctx context.Context, args []string) error {
 		return err
 	}
 	record := creght.ProjectTableRecord{Body: body}
-	if flagWasSet(fs, "sort") {
+	if flagWasSet(fs, "sort") && *sortValue != 0 {
+		// sort==0 是服务端 create 的“自动分配到末尾”触发条件（取 max+10），
+		// 不是字面 0，所以显式传 0 等于不带该字段。
 		record.Sort = sortValue
 	}
 	id, err := client.CreateProjectTableRecord(ctx, projectID, tableID, record)
@@ -384,6 +389,12 @@ func runTableRecordUpdate(ctx context.Context, args []string) error {
 	}
 	if strings.TrimSpace(*id) == "" {
 		return fmt.Errorf("--id is required")
+	}
+	if flagWasSet(fs, "sort") && *sortValue == 0 {
+		// 记录更新接口按非空字段算更新列，sort:0 会被当成“没传”而忽略；这里也没有
+		// content 那套哨兵翻译，硬塞哨兵会把魔数原样写进库。所以显式报错，而不是静默
+		// 什么都不做。
+		return fmt.Errorf("--sort=0 is not supported for table record update: the platform ignores a zero sort here, so it would silently do nothing; use a non-zero sort")
 	}
 	body, err := readJSONRawRequired(*dataPath)
 	if err != nil {

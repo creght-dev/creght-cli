@@ -261,8 +261,8 @@ func printContentUsage() {
 Usage:
   creght content list --site_id=<project_id>/<site_id> --collection=<key-or-id> [--limit=20] [--offset=0] [--filter=./filter.json]
   creght content get --site_id=<project_id>/<site_id> --collection=<key-or-id> (--id=<id> | --slug=<slug>) [--out=./content.json]
-  creght content create --site_id=<project_id>/<site_id> --collection=<key-or-id> --data=./content.json [--slug=<slug>] [--sort=0]
-  creght content update --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id> --data=./content.json [--slug=<slug>] [--sort=0] [--publish=true]
+  creght content create --site_id=<project_id>/<site_id> --collection=<key-or-id> --data=./content.json [--slug=<slug>] [--sort=<n>]
+  creght content update --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id> [--data=./content.json] [--slug=<slug>] [--sort=<n>] [--publish=true]
   creght content delete --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id>
 
 Notes:
@@ -271,9 +271,15 @@ Notes:
   {"slug":"hello-world","sort":1,"body":{"title":"Hello world","tags":["news"]}}
   slug and sort are optional in the file; --slug/--sort take precedence only
   when actually passed, so a sort in the file survives a flagless run.
-  Omitting both leaves sort out of the request entirely: create lets the
-  platform pick a default (appended last), update keeps the current value.
-  --sort accepts 0 as a real value; bigger sort shows first in the CMS list.`)
+
+  update does partial updates, so --data is optional there: pass --slug/--sort
+  alone to reorder or rename without re-submitting the body. create still
+  requires --data.
+
+  sort: bigger shows first in the CMS list. Omitting it entirely lets create
+  append the entry last and leaves update's current value alone. On create,
+  --sort=0 means the same "append last" (the platform reads 0 as auto-assign,
+  so a literal 0 cannot be created); use update --sort=0 to actually store 0.`)
 }
 
 func runContentList(ctx context.Context, args []string) error {
@@ -380,7 +386,14 @@ func runContentCreate(ctx context.Context, args []string) error {
 		content.Slug = strings.TrimSpace(*slug)
 	}
 	if flagWasSet(fs, "sort") {
-		content.Sort = sortValue
+		if *sortValue == 0 {
+			// 服务端 create 把 sort==0 当成“自动分配到末尾”（取 max+10），无法表示
+			// 字面 0，也不做哨兵翻译。显式传 0 就等于让服务端自动分配，同时要覆盖掉
+			// --data 里的 sort。要真正落一个 0，用 content update --sort=0。
+			content.Sort = nil
+		} else {
+			content.Sort = sortValue
+		}
 	}
 
 	projectID, _, err := parseSiteRef(*siteID)
@@ -410,7 +423,7 @@ func runContentUpdate(ctx context.Context, args []string) error {
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	collection := fs.String("collection", "", "collection key or id")
 	id := fs.String("id", "", "content id")
-	dataPath := fs.String("data", "", "content JSON file")
+	dataPath := fs.String("data", "", "content JSON file (optional when --slug/--sort alone)")
 	slug := fs.String("slug", "", "content slug")
 	sortValue := fs.Int("sort", 0, "content sort")
 	publish := fs.Bool("publish", true, "publish content update")
@@ -421,16 +434,26 @@ func runContentUpdate(ctx context.Context, args []string) error {
 		return fmt.Errorf("--id is required")
 	}
 
-	content, err := contentFromDataFile(*dataPath)
-	if err != nil {
-		return err
+	// --data 可省略：服务端按提交上来的非空字段做局部更新，所以只改 slug/sort 时
+	// 不必先 get 一遍再把整个 body 重新提交。
+	var content creght.Content
+	if strings.TrimSpace(*dataPath) != "" {
+		parsed, err := contentFromDataFile(*dataPath)
+		if err != nil {
+			return err
+		}
+		content = parsed
+	} else if strings.TrimSpace(*slug) == "" && !flagWasSet(fs, "sort") {
+		return fmt.Errorf("one of --data, --slug, or --sort is required")
 	}
 	content.ID = strings.TrimSpace(*id)
 	if strings.TrimSpace(*slug) != "" {
 		content.Slug = strings.TrimSpace(*slug)
 	}
 	if flagWasSet(fs, "sort") {
-		content.Sort = sortValue
+		// 0 必须走哨兵值，否则服务端会把它当成“没传 sort”而忽略。
+		v := creght.SortForUpdate(*sortValue)
+		content.Sort = &v
 	}
 
 	projectID, _, err := parseSiteRef(*siteID)

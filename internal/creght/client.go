@@ -222,9 +222,27 @@ type ContentApp struct {
 	UpdatedAt  string          `json:"updated_at,omitempty"`
 }
 
+// EmptyNumberSentinel 是服务端表达“把数值字段显式设为 0”的哨兵值。
+//
+// 服务端的更新接口按“非空字段”计算要写哪些列（fieldutil.GetNotEmptyFields 用
+// reflect IsZero 判断），所以裸的 sort:0 会被当成“调用方没传这个字段”而丢弃。
+// 提交这个哨兵值时服务端会把它翻译回 0（util.IsSpecialEmpty，快速平方根倒数里
+// 那个魔数）。
+//
+// 只对 update 有效：create 把 sort==0 当作“自动分配到末尾”（取 max+10），
+// 不做哨兵翻译，传过去会把这个魔数原样写进库。
+const EmptyNumberSentinel = -1082549324
+
+// SortForUpdate 把用户输入的 sort 转成更新接口能识别的值。
+func SortForUpdate(sort int) int {
+	if sort == 0 {
+		return EmptyNumberSentinel
+	}
+	return sort
+}
+
 // Content 的 Sort 用指针：nil 表示请求里不带 sort 字段（create 走服务端默认、
-// update 保持原值），而 *Sort==0 是一个真实可提交的排序值。用 int + omitempty
-// 会让显式的 0 静默消失。
+// update 保持原值）。用 int + omitempty 会让显式的 0 静默消失。
 type Content struct {
 	ID           string          `json:"id,omitempty"`
 	Slug         string          `json:"slug,omitempty"`

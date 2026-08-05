@@ -401,11 +401,16 @@ content.json:
 
   {"slug":"post-1","sort":1,"body":{"title":"Hi","tags":["skill"]}}
 
---sort works on both create and update; bigger sort shows first in the CMS list,
-and 0 is a real value. When neither the flag nor the file sets sort, the request
-omits it: create takes the platform default (appended last), update keeps the
-entry's current sort. Use content update --sort to reorder — deleting and
-recreating an entry changes its id and cannot be undone.
+update applies a partial update, so --data is optional for it: pass --slug/--sort
+alone to rename or reorder without re-submitting the body. create still needs
+--data.
+
+--sort works on both create and update; bigger sort shows first in the CMS list.
+Omitting it lets create append the entry last and leaves update's current value
+untouched. On create, --sort=0 also means "append last" — the platform reads a
+zero sort as auto-assign, so a literal 0 can only be stored via update --sort=0.
+Use content update --sort to reorder; deleting and recreating an entry changes
+its id and cannot be undone.
 
 Detail commands print JSON to stdout; use --out=<file> to save. content update
 exits non-zero with "not updated: <reason>" when no field actually changed —
