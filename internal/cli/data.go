@@ -262,14 +262,18 @@ Usage:
   creght content list --site_id=<project_id>/<site_id> --collection=<key-or-id> [--limit=20] [--offset=0] [--filter=./filter.json]
   creght content get --site_id=<project_id>/<site_id> --collection=<key-or-id> (--id=<id> | --slug=<slug>) [--out=./content.json]
   creght content create --site_id=<project_id>/<site_id> --collection=<key-or-id> --data=./content.json [--slug=<slug>] [--sort=0]
-  creght content update --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id> --data=./content.json [--slug=<slug>] [--publish=true]
+  creght content update --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id> --data=./content.json [--slug=<slug>] [--sort=0] [--publish=true]
   creght content delete --site_id=<project_id>/<site_id> --collection=<key-or-id> --id=<id>
 
 Notes:
   --data must be a full content object with the business fields wrapped under
   an object-valued "body" key (this is the only accepted format):
   {"slug":"hello-world","sort":1,"body":{"title":"Hello world","tags":["news"]}}
-  slug and sort are optional in the file; --slug/--sort flags take precedence.`)
+  slug and sort are optional in the file; --slug/--sort take precedence only
+  when actually passed, so a sort in the file survives a flagless run.
+  Omitting both leaves sort out of the request entirely: create lets the
+  platform pick a default (appended last), update keeps the current value.
+  --sort accepts 0 as a real value; bigger sort shows first in the CMS list.`)
 }
 
 func runContentList(ctx context.Context, args []string) error {
@@ -375,7 +379,9 @@ func runContentCreate(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*slug) != "" {
 		content.Slug = strings.TrimSpace(*slug)
 	}
-	content.Sort = *sortValue
+	if flagWasSet(fs, "sort") {
+		content.Sort = sortValue
+	}
 
 	projectID, _, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -406,6 +412,7 @@ func runContentUpdate(ctx context.Context, args []string) error {
 	id := fs.String("id", "", "content id")
 	dataPath := fs.String("data", "", "content JSON file")
 	slug := fs.String("slug", "", "content slug")
+	sortValue := fs.Int("sort", 0, "content sort")
 	publish := fs.Bool("publish", true, "publish content update")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -421,6 +428,9 @@ func runContentUpdate(ctx context.Context, args []string) error {
 	content.ID = strings.TrimSpace(*id)
 	if strings.TrimSpace(*slug) != "" {
 		content.Slug = strings.TrimSpace(*slug)
+	}
+	if flagWasSet(fs, "sort") {
+		content.Sort = sortValue
 	}
 
 	projectID, _, err := parseSiteRef(*siteID)

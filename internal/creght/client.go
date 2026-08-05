@@ -222,6 +222,9 @@ type ContentApp struct {
 	UpdatedAt  string          `json:"updated_at,omitempty"`
 }
 
+// Content 的 Sort 用指针：nil 表示请求里不带 sort 字段（create 走服务端默认、
+// update 保持原值），而 *Sort==0 是一个真实可提交的排序值。用 int + omitempty
+// 会让显式的 0 静默消失。
 type Content struct {
 	ID           string          `json:"id,omitempty"`
 	Slug         string          `json:"slug,omitempty"`
@@ -231,7 +234,7 @@ type Content struct {
 	Tags         []string        `json:"tags,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Body         json.RawMessage `json:"body,omitempty"`
-	Sort         int             `json:"sort,omitempty"`
+	Sort         *int            `json:"sort,omitempty"`
 	CreatedAt    string          `json:"created_at,omitempty"`
 	UpdatedAt    string          `json:"updated_at,omitempty"`
 }
@@ -273,12 +276,13 @@ type ProjectTable struct {
 	UpdatedAt  string          `json:"updated_at,omitempty"`
 }
 
+// Sort 语义同 Content.Sort：nil 表示不提交该字段。
 type ProjectTableRecord struct {
 	ID        string          `json:"id,omitempty"`
 	TableID   string          `json:"table_id,omitempty"`
 	UserID    int64           `json:"user_id,omitempty"`
 	Body      json.RawMessage `json:"body,omitempty"`
-	Sort      int             `json:"sort,omitempty"`
+	Sort      *int            `json:"sort,omitempty"`
 	CreatedAt string          `json:"created_at,omitempty"`
 	UpdatedAt string          `json:"updated_at,omitempty"`
 }

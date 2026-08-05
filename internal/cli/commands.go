@@ -396,9 +396,16 @@ func contentCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 
 For create/update, --data points at a full content object whose business fields
 are wrapped under a "body" key (top-level slug/sort are optional; matching flags
-win). Bare body files are rejected with a format error. Example content.json:
+win when passed). Bare body files are rejected with a format error. Example
+content.json:
 
   {"slug":"post-1","sort":1,"body":{"title":"Hi","tags":["skill"]}}
+
+--sort works on both create and update; bigger sort shows first in the CMS list,
+and 0 is a real value. When neither the flag nor the file sets sort, the request
+omits it: create takes the platform default (appended last), update keeps the
+entry's current sort. Use content update --sort to reorder — deleting and
+recreating an entry changes its id and cannot be undone.
 
 Detail commands print JSON to stdout; use --out=<file> to save. content update
 exits non-zero with "not updated: <reason>" when no field actually changed —

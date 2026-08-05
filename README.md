@@ -410,19 +410,12 @@ creght content update --site_id=<project_id>/<site_id> --collection=blogs --id=<
 creght content delete --site_id=<project_id>/<site_id> --collection=blogs --id=<content_id>
 ```
 
-`--data` can point to either a plain CMS content body or a full content object. A plain content body may include a business field named `body`. The CLI treats JSON as a full content object only when it includes wrapper fields such as `id`, `slug`, `content_app_id`, `json_schema`, `status`, `sort`, or `tags`.
-
-If your business JSON has a top-level `slug`, do not pass it as plain body JSON because `slug` is a content wrapper field. Either pass the slug as a flag and omit it from `--data`:
-
-```bash
-creght content create --site_id=<project_id>/<site_id> --collection=prompts --data=./content-body.json --slug=typography-v02
-```
-
-Or use a full content object and put business fields under `body`:
+`--data` must be a full content object whose business fields sit under an object-valued `body` key. This is the only accepted format — a bare body is rejected with a format error, because guessing between the two shapes silently dropped fields whenever the body itself contained a name like `tags`, `slug`, or `sort`.
 
 ```json
 {
   "slug": "typography-v02",
+  "sort": 15,
   "body": {
     "title": "Typography V.02",
     "description": "100vh",
@@ -430,6 +423,15 @@ Or use a full content object and put business fields under `body`:
   }
 }
 ```
+
+Top-level `slug` and `sort` are optional; the `--slug` / `--sort` flags override the file only when actually passed:
+
+```bash
+creght content create --site_id=<project_id>/<site_id> --collection=prompts --data=./content.json --slug=typography-v02
+creght content update --site_id=<project_id>/<site_id> --collection=prompts --id=<content_id> --data=./content.json --sort=15
+```
+
+`sort` controls the order editors see in the CMS list — bigger shows first, and `0` is a real value rather than "unset". When neither the flag nor the file sets it, the request omits `sort` entirely: `create` takes the platform default (appended last) and `update` leaves the entry's current sort alone. Use `content update --sort` to reorder; deleting and recreating an entry changes its id, and site versions do not snapshot CMS content, so that cannot be undone.
 
 ## Manage Forms
 
@@ -484,7 +486,9 @@ creght table record delete --site_id=<project_id>/<site_id> --table=appointments
 ```
 
 `record update` sends a patch body to the backend. Existing fields are merged,
-and a `null` field value removes that field.
+and a `null` field value removes that field. Both `create` and `update` accept
+`--sort=<n>` with the same semantics as content sort: `0` is a real value, and
+omitting the flag leaves `sort` out of the request instead of zeroing it.
 
 ## Func Backend Code As Files
 

@@ -359,10 +359,11 @@ func runTableRecordCreate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	id, err := client.CreateProjectTableRecord(ctx, projectID, tableID, creght.ProjectTableRecord{
-		Body: body,
-		Sort: *sortValue,
-	})
+	record := creght.ProjectTableRecord{Body: body}
+	if flagWasSet(fs, "sort") {
+		record.Sort = sortValue
+	}
+	id, err := client.CreateProjectTableRecord(ctx, projectID, tableID, record)
 	if err != nil {
 		return err
 	}
@@ -401,11 +402,14 @@ func runTableRecordUpdate(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := client.UpdateProjectTableRecord(ctx, projectID, tableID, creght.ProjectTableRecord{
+	record := creght.ProjectTableRecord{
 		ID:   strings.TrimSpace(*id),
 		Body: body,
-		Sort: *sortValue,
-	}); err != nil {
+	}
+	if flagWasSet(fs, "sort") {
+		record.Sort = sortValue
+	}
+	if err := client.UpdateProjectTableRecord(ctx, projectID, tableID, record); err != nil {
 		return err
 	}
 
