@@ -476,15 +476,24 @@ push has to settle what happens to unversioned editor work first.
 
 Credentials come from ` + "`creght login`" + `, not a git password. Run ` + "`creght git setup`" + `
 once and git stops asking.`),
-		Example: strings.TrimSpace(`  creght git setup
+		Example: strings.TrimSpace(`  creght git clone --site_id=<project_id>/<site_id>
   creght git url
-  git clone $(creght git url)
+  creght git setup
   git show v195:page/Price.tsx
   git diff published..main`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "clone", "Clone a site over git, leaving credentials in the new repo only.", runGit, func(flags *pflag.FlagSet) {
+		flags.String("site_id", "", "site id, or project_id/site_id")
+		flags.String("dir", "", "workspace directory")
+	}, withLong(strings.TrimSpace(`Clone a site's version history over git.
+
+Credentials are written into the new repository's own config, so later fetch and
+pull keep working without touching the global git config or the OS keychain
+(osxkeychain on macOS, Git Credential Manager on Windows). Use `+"`creght git setup`"+`
+instead if you want it configured once for every clone on the machine.`))))
 	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "setup", "Register the git credential helper so git stops asking for a password.", runGit, func(flags *pflag.FlagSet) {
 		flags.String("site_id", "", "site id, or project_id/site_id")
 		flags.String("dir", "", "workspace directory")

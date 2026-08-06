@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -29,10 +30,12 @@ const gitCredentialUsername = "creght"
 
 func runGit(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("git requires a subcommand: credential, url, setup")
+		return fmt.Errorf("git requires a subcommand: clone, url, setup, credential")
 	}
 
 	switch args[0] {
+	case "clone":
+		return runGitClone(ctx, args[1:])
 	case "credential":
 		return runGitCredential(ctx, args[1:])
 	case "url":
@@ -213,16 +216,8 @@ func runGitSetup(ctx context.Context, args []string) error {
 	}
 	host := canonicalAPIHost(cfg.APIHost)
 
-	self, err := os.Executable()
-	if err != nil {
-		// Fall back to the command name; a helper resolved from PATH still works.
-		self = "creght"
-	}
-
-	// The "!" prefix tells git the value is a command line, not a
-	// git-credential-<name> binary.
 	key := "credential." + strings.TrimRight(host, "/") + ".helper"
-	value := "!" + quoteForGitConfig(self) + " git credential"
+	value := gitCredentialHelperValue()
 
 	// credential.helper is multi-valued and inherits from the system config, so
 	// on macOS osxkeychain is usually already in the list. Two problems with
@@ -264,6 +259,73 @@ func runGitSetup(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("\n  git clone %s\n", cloneURL)
+	return nil
+}
+
+// gitCredentialHelperValue builds the credential.helper value. The "!" prefix
+// tells git the value is a command line rather than a git-credential-<name>
+// binary.
+//
+// Backslashes are converted because git runs the helper through its bundled sh
+// even on Windows, where a raw C:\path\creght.exe would have its separators
+// eaten as escapes.
+func gitCredentialHelperValue() string {
+	self, err := os.Executable()
+	if err != nil {
+		// A helper resolved from PATH still works.
+		self = "creght"
+	}
+	return "!" + quoteForGitConfig(filepath.ToSlash(self)) + " git credential"
+}
+
+// runGitClone clones a site and leaves the credential helper in the new
+// repository's own config, so later fetch/pull keep working without touching the
+// global git config or the OS keychain. `git clone -c` persists into the created
+// repo, which is what makes the one-shot form possible.
+func runGitClone(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("git clone", flag.ContinueOnError)
+	siteID, dir := versionSiteFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("git clone accepts at most one target directory")
+	}
+
+	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	cloneURL, err := gitCloneURL(cfg.APIHost, projectID, realSiteID)
+	if err != nil {
+		return err
+	}
+
+	key := "credential." + strings.TrimRight(canonicalAPIHost(cfg.APIHost), "/") + ".helper"
+	// The empty value first resets helpers inherited from the system config
+	// (osxkeychain on macOS, Git Credential Manager on Windows) for this URL only.
+	gitArgs := []string{
+		"clone",
+		"-c", key + "=",
+		"-c", key + "=" + gitCredentialHelperValue(),
+		cloneURL,
+	}
+	if fs.NArg() == 1 {
+		gitArgs = append(gitArgs, fs.Arg(0))
+	}
+
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone: %w", err)
+	}
 	return nil
 }
 
