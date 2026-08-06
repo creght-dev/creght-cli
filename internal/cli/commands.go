@@ -72,7 +72,7 @@ current API host only.`, helpAPIHost(), helpConfigPath()),
 
 	root.AddCommand(loginCommand(ctx, rawArgs))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"logout"}, "logout", "Remove the saved CLI login for the current API host.", func(ctx context.Context, args []string) error {
-		return runLogout(args)
+		return runLogout(ctx, args)
 	}, nil))
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,

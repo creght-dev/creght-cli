@@ -72,8 +72,20 @@ func runGitCredential(ctx context.Context, args []string) error {
 
 	switch operation {
 	case "get":
-	case "store", "erase":
-		// The token lives in the CLI config; git must not cache or delete it.
+	case "store":
+		// The token lives in the CLI config; git must not cache a second copy.
+		return nil
+	case "erase":
+		// git calls erase when the server rejected the credential we supplied —
+		// in practice, an expired token. Without a word here the user only sees
+		// "fatal: Authentication failed" with no hint about what to do, so use
+		// stderr (stdout is the protocol channel) to say it. Deliberately does
+		// NOT delete the stored token: a 401 can also be a transient server
+		// problem or a permission issue, and destroying the login would be worse
+		// than a retry.
+		if request["host"] != "" {
+			fmt.Fprintf(os.Stderr, "creght: credentials for %s were rejected — the token has likely expired, run `creght login`\n", request["host"])
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported credential operation: %s", operation)
@@ -276,6 +288,38 @@ func gitCredentialHelperValue() string {
 		self = "creght"
 	}
 	return "!" + quoteForGitConfig(filepath.ToSlash(self)) + " git credential"
+}
+
+// purgeGitCredentials asks git to drop any cached credential for a host.
+//
+// This is what clears an entry already sitting in the OS credential store
+// (osxkeychain on macOS, Git Credential Manager on Windows). Registering our
+// helper only stops future writes; it cannot remove what is already there, and a
+// stale entry answers first and wins.
+//
+// `git credential reject` is used rather than an OS-specific command because it
+// notifies every helper on the chain, so one code path covers all platforms.
+// Failures are ignored: having nothing cached is the common case and must not
+// turn into an error.
+//
+// Only logout calls this. setup and clone deliberately do not: touching the OS
+// credential store as a side effect of a setup command is more surprising than
+// helpful, and registering our helper already stops future writes there. Clearing
+// a pre-existing entry is left to the user (`git credential reject`, or the
+// keychain UI).
+func purgeGitCredentials(ctx context.Context, host string) {
+	stripped := stripScheme(host)
+	if stripped == "" {
+		return
+	}
+	protocol := "https"
+	if strings.HasPrefix(host, "http://") {
+		protocol = "http"
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "credential", "reject")
+	cmd.Stdin = strings.NewReader(fmt.Sprintf("protocol=%s\nhost=%s\n\n", protocol, stripped))
+	_ = cmd.Run()
 }
 
 // runGitClone clones a site and leaves the credential helper in the new

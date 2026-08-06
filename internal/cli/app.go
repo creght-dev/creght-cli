@@ -126,8 +126,17 @@ func runLogin(ctx context.Context, args []string) error {
 	return fmt.Errorf("authorization timed out")
 }
 
-func runLogout(args []string) error {
+// runLogout revokes the token server-side, drops it from git's credential store,
+// then removes the local config — in that order, because each step needs what the
+// previous one still has.
+//
+// Revoking first matters: `creght logout` used to only delete the local file, so
+// the token stayed valid until its TTL expired and any other copy of it kept
+// working. Reporting "Logged out." while the credential still authenticates is a
+// lie worth avoiding, which is why a failed revoke aborts instead of pressing on.
+func runLogout(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	localOnly := fs.Bool("local_only", false, "only forget the local credentials; do not revoke the token server-side")
 	err := fs.Parse(args)
 	if err != nil {
 		return err
@@ -136,11 +145,37 @@ func runLogout(args []string) error {
 		return fmt.Errorf("logout does not accept positional arguments")
 	}
 
+	client, cfg, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+
+	if !*localOnly {
+		if cfg.Token == "" {
+			fmt.Println("No saved login for", canonicalAPIHost(cfg.APIHost))
+		} else if err := client.Logout(ctx); err != nil {
+			// Keep the local config so the revoke can be retried; deleting it now
+			// would leave a live token with no way to reach it.
+			return fmt.Errorf("revoke token on %s: %w\n"+
+				"The token is still valid server-side. Retry when reachable, "+
+				"or run `creght logout --local_only` to only forget it locally",
+				canonicalAPIHost(cfg.APIHost), err)
+		}
+	}
+
+	// Clear git's credential store too. Otherwise the next clone keeps offering a
+	// revoked token and fails with a bare "Authentication failed".
+	purgeGitCredentials(ctx, canonicalAPIHost(cfg.APIHost))
+
 	if err := deleteConfig(); err != nil {
 		return err
 	}
 
-	fmt.Println("Logged out.")
+	if *localOnly {
+		fmt.Println("Local credentials removed. The token is still valid server-side until it expires.")
+	} else {
+		fmt.Println("Logged out.")
+	}
 	return nil
 }
 

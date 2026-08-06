@@ -910,3 +910,12 @@ func (c *Client) postPublishVersion(ctx context.Context, projectID string, siteI
 func StringPtr(v string) *string {
 	return &v
 }
+
+// Logout revokes the token this client authenticates with, server-side.
+//
+// This is not merely a local "forget": until it runs, the token stays valid for
+// the rest of its TTL, so every copy of it keeps working — another machine's CLI
+// config, an entry cached by git's credential store, a line pasted into curl.
+func (c *Client) Logout(ctx context.Context) error {
+	return c.do(ctx, http.MethodPost, "/api/p/logout", nil, nil, nil)
+}
