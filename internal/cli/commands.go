@@ -203,6 +203,7 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 	root.AddCommand(tableCommand(ctx, rawArgs))
 	root.AddCommand(funcCommand(ctx, rawArgs))
 	root.AddCommand(uploadCommand(ctx, rawArgs))
+	root.AddCommand(gitCommand(ctx, rawArgs))
 	root.AddCommand(versionCommand(ctx, rawArgs))
 
 	return root
@@ -451,6 +452,52 @@ func cmsCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	collection.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"cms"}, "update", "Update a CMS collection.", runCMS, addSchemaUpdateFlags))
 	collection.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"cms"}, "delete", "Delete a CMS collection.", runCMS, addGetFlags))
 	cmd.AddCommand(collection)
+	return cmd
+}
+
+// gitCommand exposes the site's version history through git. The site is
+// reachable as a read-only git remote, so `git log`, `git show <ver>:<path>`,
+// `git diff` and `git blame` work without the CLI reimplementing any of them.
+func gitCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "git",
+		Short: "Use a site's version history as a read-only git remote.",
+		Long: strings.TrimSpace(`A site's versions are also served as a git repository, one commit per version:
+
+  refs/heads/main        newest version
+  refs/tags/v<no>        each version, so ` + "`git show v195:page/Price.tsx`" + ` works
+  refs/heads/published   the version production currently serves
+
+That makes ` + "`git diff published..main`" + ` answer "what would go live if I published
+now" at source level, which is more precise than comparing rendered output.
+
+The remote is read-only: push still goes through ` + "`creght push`" + `. Accepting a git
+push has to settle what happens to unversioned editor work first.
+
+Credentials come from ` + "`creght login`" + `, not a git password. Run ` + "`creght git setup`" + `
+once and git stops asking.`),
+		Example: strings.TrimSpace(`  creght git setup
+  creght git url
+  git clone $(creght git url)
+  git show v195:page/Price.tsx
+  git diff published..main`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "setup", "Register the git credential helper so git stops asking for a password.", runGit, func(flags *pflag.FlagSet) {
+		flags.String("site_id", "", "site id, or project_id/site_id")
+		flags.String("dir", "", "workspace directory")
+		flags.Bool("global", true, "write to the global git config")
+	}))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "url", "Print the git clone URL for a site.", runGit, func(flags *pflag.FlagSet) {
+		flags.String("site_id", "", "site id, or project_id/site_id")
+		flags.String("dir", "", "workspace directory")
+	}))
+	// Invoked by git itself, not by hand.
+	credential := legacyCommandPass(ctx, rawArgs, []string{"git"}, "credential", "git credential helper (invoked by git, not by hand).", runGit, func(flags *pflag.FlagSet) {})
+	credential.Hidden = true
+	cmd.AddCommand(credential)
 	return cmd
 }
 
