@@ -477,7 +477,6 @@ push has to settle what happens to unversioned editor work first.
 Credentials come from ` + "`creght login`" + `, not a git password. ` + "`creght git clone`" + `
 leaves them in the new repository, so git never asks.`),
 		Example: strings.TrimSpace(`  creght git clone --site_id=<project_id>/<site_id>
-  creght git url
   git show v195:page/Price.tsx
   git diff published..main`),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -496,10 +495,6 @@ pull keep working without touching the global git config or the OS keychain
 That is why this command exists rather than a one-off machine-wide setup step:
 `+"`git clone -c`"+` persists into the repository it creates, so cloning through
 creght is enough and nothing outside the new repo is modified.`))))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "url", "Print the git clone URL for a site.", runGit, func(flags *pflag.FlagSet) {
-		flags.String("site_id", "", "site id, or project_id/site_id")
-		flags.String("dir", "", "workspace directory")
-	}))
 	// Invoked by git itself, not by hand.
 	credential := legacyCommandPass(ctx, rawArgs, []string{"git"}, "credential", "git credential helper (invoked by git, not by hand).", runGit, func(flags *pflag.FlagSet) {})
 	credential.Hidden = true

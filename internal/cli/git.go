@@ -38,8 +38,6 @@ func runGit(ctx context.Context, args []string) error {
 		return runGitClone(ctx, args[1:])
 	case "credential":
 		return runGitCredential(ctx, args[1:])
-	case "url":
-		return runGitURL(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown git subcommand: %s", args[0])
 	}
@@ -169,36 +167,6 @@ func stripScheme(host string) string {
 	return strings.TrimSuffix(host, "/")
 }
 
-// runGitURL prints the clone URL for a site. Inside a pulled workspace the site
-// is discovered the same way pull/push discover it.
-func runGitURL(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("git url", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
-	if err != nil {
-		return err
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
-	}
-
-	cloneURL, err := gitCloneURL(cfg.APIHost, projectID, realSiteID)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(cloneURL)
-	return nil
-}
-
-// gitCloneURL builds the remote URL. The /api prefix is required: only /api/* is
-// routed to the API service, so a bare /git path reaches the frontend instead.
 func gitCloneURL(apiHost string, projectID string, siteID string) (string, error) {
 	base, err := url.Parse(canonicalAPIHost(apiHost))
 	if err != nil {
