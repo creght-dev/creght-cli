@@ -163,10 +163,6 @@ func runLogout(ctx context.Context, args []string) error {
 		}
 	}
 
-	// Clear git's credential store too. Otherwise the next clone keeps offering a
-	// revoked token and fails with a bare "Authentication failed".
-	purgeGitCredentials(ctx, canonicalAPIHost(cfg.APIHost))
-
 	if err := deleteConfig(); err != nil {
 		return err
 	}

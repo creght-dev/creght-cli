@@ -203,7 +203,6 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 	root.AddCommand(tableCommand(ctx, rawArgs))
 	root.AddCommand(funcCommand(ctx, rawArgs))
 	root.AddCommand(uploadCommand(ctx, rawArgs))
-	root.AddCommand(gitCommand(ctx, rawArgs))
 	root.AddCommand(versionCommand(ctx, rawArgs))
 
 	return root
@@ -452,53 +451,6 @@ func cmsCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	collection.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"cms"}, "update", "Update a CMS collection.", runCMS, addSchemaUpdateFlags))
 	collection.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"cms"}, "delete", "Delete a CMS collection.", runCMS, addGetFlags))
 	cmd.AddCommand(collection)
-	return cmd
-}
-
-// gitCommand exposes the site's version history through git. The site is
-// reachable as a read-only git remote, so `git log`, `git show <ver>:<path>`,
-// `git diff` and `git blame` work without the CLI reimplementing any of them.
-func gitCommand(ctx context.Context, rawArgs []string) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "git",
-		Short: "Use a site's version history as a read-only git remote.",
-		Long: strings.TrimSpace(`A site's versions are also served as a git repository, one commit per version:
-
-  refs/heads/main        newest version
-  refs/tags/v<no>        each version, so ` + "`git show v195:page/Price.tsx`" + ` works
-  refs/heads/published   the version production currently serves
-
-That makes ` + "`git diff published..main`" + ` answer "what would go live if I published
-now" at source level, which is more precise than comparing rendered output.
-
-The remote is read-only: push still goes through ` + "`creght push`" + `. Accepting a git
-push has to settle what happens to unversioned editor work first.
-
-Credentials come from ` + "`creght login`" + `, not a git password. ` + "`creght git clone`" + `
-leaves them in the new repository, so git never asks.`),
-		Example: strings.TrimSpace(`  creght git clone --site_id=<project_id>/<site_id>
-  git show v195:page/Price.tsx
-  git diff published..main`),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "clone", "Clone a site over git, leaving credentials in the new repo only.", runGit, func(flags *pflag.FlagSet) {
-		flags.String("site_id", "", "site id, or project_id/site_id")
-		flags.String("dir", "", "workspace directory")
-	}, withLong(strings.TrimSpace(`Clone a site's version history over git.
-
-Credentials are written into the new repository's own config, so later fetch and
-pull keep working without touching the global git config or the OS keychain
-(osxkeychain on macOS, Git Credential Manager on Windows).
-
-That is why this command exists rather than a one-off machine-wide setup step:
-`+"`git clone -c`"+` persists into the repository it creates, so cloning through
-creght is enough and nothing outside the new repo is modified.`))))
-	// Invoked by git itself, not by hand.
-	credential := legacyCommandPass(ctx, rawArgs, []string{"git"}, "credential", "git credential helper (invoked by git, not by hand).", runGit, func(flags *pflag.FlagSet) {})
-	credential.Hidden = true
-	cmd.AddCommand(credential)
 	return cmd
 }
 
