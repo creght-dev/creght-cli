@@ -33,6 +33,12 @@ func runVersion(ctx context.Context, args []string) error {
 		return runVersionList(ctx, args[1:])
 	case "publish":
 		return runVersionPublish(ctx, args[1:])
+	case "cat":
+		return runVersionCat(ctx, args[1:])
+	case "diff":
+		return runVersionDiff(ctx, args[1:])
+	case "rollback":
+		return runVersionRollback(ctx, args[1:])
 	case "help", "-h", "--help":
 		printVersionUsage()
 		return nil
@@ -49,6 +55,9 @@ Usage:
   creght version create [--note=<note>]                Snapshot the remote site source into a new version
   creght version list [--limit=<n>] [--json]           List site versions, newest first
   creght version publish <version_no> [--note=<note>]  Make an existing version live
+  creght version cat <version_no> <path>               Print a file as of that version
+  creght version diff <version_no> [<version_no>]      Compare two versions, or one against live
+  creght version rollback <version_no>                 Put the live files back to that version
 
 Notes:
   Inside a pulled workspace --site_id is optional; it is read from

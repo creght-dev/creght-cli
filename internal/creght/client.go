@@ -723,9 +723,22 @@ type FileListResponse struct {
 }
 
 func (c *Client) GetFileList(ctx context.Context, projectID string, siteID string) (FileListResponse, error) {
+	return c.GetFileListAtVersion(ctx, projectID, siteID, "")
+}
+
+// GetFileListAtVersion reads the site's files as of one version.
+//
+// An empty version means the live files, which is what every other command works
+// against. A version number gives that snapshot instead — the only way to see what
+// a file used to contain, since the live files carry no history of their own.
+func (c *Client) GetFileListAtVersion(ctx context.Context, projectID string, siteID string, version string) (FileListResponse, error) {
 	var ret FileListResponse
 	path := fmt.Sprintf("/api/u/project/%s/site/%s/file_list", url.PathEscape(projectID), url.PathEscape(siteID))
-	err := c.do(ctx, http.MethodGet, path, nil, nil, &ret)
+	var query url.Values
+	if version != "" {
+		query = url.Values{"version": []string{version}}
+	}
+	err := c.do(ctx, http.MethodGet, path, query, nil, &ret)
 	if err != nil {
 		return FileListResponse{}, err
 	}

@@ -309,9 +309,9 @@ func TestHasVersionArgDoesNotHijackVersionPublish(t *testing.T) {
 }
 
 func TestRunVersionRejectsUnknownSubcommand(t *testing.T) {
-	err := runVersion(context.Background(), []string{"rollback"})
+	err := runVersion(context.Background(), []string{"nonesuch"})
 	if err == nil || !strings.Contains(err.Error(), "unknown version command") {
-		t.Fatalf("runVersion(rollback) = %v, want an unknown-command error", err)
+		t.Fatalf("runVersion(nonesuch) = %v, want an unknown-command error", err)
 	}
 }
 

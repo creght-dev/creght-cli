@@ -281,14 +281,49 @@ This changes only which snapshot the live site serves. It restores nothing: the
 editable site workspace and your local files are untouched, and creght pull
 still fetches the current workspace rather than the published version's files.
 So after rolling production back, the workspace still holds the newer source and
-the next publish would ship it again — to revert the code itself, edit locally
-and push. CMS content and /platform/** definitions are live and never move with
-a version either.
+the next publish would ship it again — to revert the code itself, use creght
+version rollback. CMS content and /platform/** definitions are live and never
+move with a version either.
 
 To snapshot the current source and publish it in one step, use creght publish.`),
 		withExample(`  creght version publish 12
   creght version publish 12 --note="Roll back nav change"
   creght version publish id:456`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "cat <version_no> <path>", "Print a site file as it was at a version.", runVersion, addVersionSiteFlags,
+		withLong(`Print one file's content as of a version, to stdout.
+
+The live files carry no history of their own, so this is the only way to see what
+a file used to contain. creght cat reads the current file; this reads a past one.`),
+		withExample(`  creght version cat 190 page/Price.tsx
+  creght version cat 190 page/Price.tsx > page/Price.tsx   # take it back`)))
+
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "diff <version_no> [<version_no>]", "Compare two versions, or one version against the live files.", runVersion, addVersionDiffFlags,
+		withLong(`List the files that differ between two versions.
+
+With one version, compares it against the live files — which answers "what has
+changed since that snapshot". With two, compares them to each other.
+
+Use creght version cat to read either side of a change.`),
+		withExample(`  creght version diff 190
+  creght version diff 190 195`)))
+
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "rollback <version_no>", "Put the live site files back to an earlier version.", runVersion, addVersionRollbackFlags,
+		withLong(`Restore the live site files to an earlier version: files whose content changed
+are reverted, files added since are deleted, and files deleted since are restored.
+
+This is the counterpart to creght version publish. Publishing rolls PRODUCTION
+back but leaves the editable files at the newest state; this rolls the editable
+files back and leaves production alone. Both together undo a bad edit completely.
+
+The change lands on the preview domain immediately, like creght push. History is
+not rewritten — the rollback is an ordinary write on top of the current state, so
+every version in between still exists. Record the result with creght version
+create, and put it into production with creght version publish.
+
+Applied as one batch, so a failure cannot leave the site half rolled back.`),
+		withExample(`  creght version rollback 190 --dry_run
+  creght version rollback 190`)))
+
 	return cmd
 }
 
@@ -593,6 +628,17 @@ func addVersionPublishFlags(flags *pflag.FlagSet) {
 	addVersionSiteFlags(flags)
 	flags.String("note", "", "Optional publish note.")
 	flags.Bool("json", false, "Print the publish result as JSON.")
+}
+
+func addVersionDiffFlags(flags *pflag.FlagSet) {
+	addVersionSiteFlags(flags)
+	flags.Bool("name_only", false, "List changed paths without the trailing summary.")
+}
+
+func addVersionRollbackFlags(flags *pflag.FlagSet) {
+	addVersionSiteFlags(flags)
+	flags.Bool("dry_run", false, "Show what would change and stop.")
+	flags.Bool("yes", false, "Skip the confirmation prompt.")
 }
 
 func addProjectCreateFlags(flags *pflag.FlagSet) {
