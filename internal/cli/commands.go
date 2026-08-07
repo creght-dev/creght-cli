@@ -474,11 +474,10 @@ now" at source level, which is more precise than comparing rendered output.
 The remote is read-only: push still goes through ` + "`creght push`" + `. Accepting a git
 push has to settle what happens to unversioned editor work first.
 
-Credentials come from ` + "`creght login`" + `, not a git password. Run ` + "`creght git setup`" + `
-once and git stops asking.`),
+Credentials come from ` + "`creght login`" + `, not a git password. ` + "`creght git clone`" + `
+leaves them in the new repository, so git never asks.`),
 		Example: strings.TrimSpace(`  creght git clone --site_id=<project_id>/<site_id>
   creght git url
-  creght git setup
   git show v195:page/Price.tsx
   git diff published..main`),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -492,13 +491,11 @@ once and git stops asking.`),
 
 Credentials are written into the new repository's own config, so later fetch and
 pull keep working without touching the global git config or the OS keychain
-(osxkeychain on macOS, Git Credential Manager on Windows). Use `+"`creght git setup`"+`
-instead if you want it configured once for every clone on the machine.`))))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "setup", "Register the git credential helper so git stops asking for a password.", runGit, func(flags *pflag.FlagSet) {
-		flags.String("site_id", "", "site id, or project_id/site_id")
-		flags.String("dir", "", "workspace directory")
-		flags.Bool("global", true, "write to the global git config")
-	}))
+(osxkeychain on macOS, Git Credential Manager on Windows).
+
+That is why this command exists rather than a one-off machine-wide setup step:
+`+"`git clone -c`"+` persists into the repository it creates, so cloning through
+creght is enough and nothing outside the new repo is modified.`))))
 	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"git"}, "url", "Print the git clone URL for a site.", runGit, func(flags *pflag.FlagSet) {
 		flags.String("site_id", "", "site id, or project_id/site_id")
 		flags.String("dir", "", "workspace directory")

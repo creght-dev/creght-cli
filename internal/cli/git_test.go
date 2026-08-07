@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -133,51 +132,31 @@ func TestQuoteForGitConfig(t *testing.T) {
 	}
 }
 
-// TestGitSetupResetsInheritedHelpers 锁住那个微妙的顺序：空值必须排在我们的
+// TestGitCloneResetsInheritedHelpers 锁住那个微妙的顺序：空值必须排在我们的
 // helper 之前，否则系统继承来的 osxkeychain 会先应答，`creght login` 换过的
 // token 会输给钥匙串里的旧值。
-func TestGitSetupResetsInheritedHelpers(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git binary not available")
+//
+// 这个性质现在归 clone 管 —— `git clone -c` 会把这两条写进新仓库自己的 config，
+// 所以 clone 一次就够，不需要再有一个改全局配置的 setup 步骤。
+func TestGitCloneResetsInheritedHelpers(t *testing.T) {
+	args := gitCredentialConfigArgs("https://test.creght.cn")
+	if len(args) != 4 {
+		t.Fatalf("args = %#v, want two -c settings", args)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	// 预先放一个继承来的 helper，模拟 macOS 的 osxkeychain。
-	writeGitConfig(t, home, "credential.https://test.creght.cn.helper", "osxkeychain")
-
-	path, err := configPath()
-	if err != nil {
-		t.Fatalf("configPath: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	bs, _ := json.Marshal(Config{APIHost: "https://test.creght.cn", Token: "tok"})
-	if err := os.WriteFile(path, bs, 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	if args[0] != "-c" || args[2] != "-c" {
+		t.Fatalf("args = %#v, want each setting introduced by -c", args)
 	}
 
-	if err := runGitSetup(context.Background(), nil); err != nil {
-		t.Fatalf("runGitSetup: %v", err)
+	const key = "credential.https://test.creght.cn.helper"
+	if args[1] != key+"=" {
+		t.Fatalf("first setting = %q, want %q so inherited helpers are reset before ours", args[1], key+"=")
 	}
-
-	out, err := exec.Command("git", "config", "--global", "--get-all", "credential.https://test.creght.cn.helper").Output()
-	if err != nil {
-		t.Fatalf("git config --get-all: %v", err)
+	if !strings.HasPrefix(args[3], key+"=") || !strings.Contains(args[3], "git credential") {
+		t.Fatalf("second setting = %q, want our helper", args[3])
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("helper list = %#v, want [\"\", helper]", lines)
-	}
-	if lines[0] != "" {
-		t.Fatalf("first helper = %q, want empty so inherited helpers are reset", lines[0])
-	}
-	if !strings.Contains(lines[1], "git credential") {
-		t.Fatalf("second helper = %q", lines[1])
-	}
-	if strings.Contains(string(out), "osxkeychain") {
-		t.Fatal("inherited osxkeychain helper survived; it would answer first with a stale token")
+	// URL 限定：不能碰到 github.com 之类的凭证。
+	if !strings.Contains(args[1], "test.creght.cn") {
+		t.Fatalf("setting is not scoped to the host: %q", args[1])
 	}
 }
 

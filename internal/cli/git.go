@@ -40,8 +40,6 @@ func runGit(ctx context.Context, args []string) error {
 		return runGitCredential(ctx, args[1:])
 	case "url":
 		return runGitURL(ctx, args[1:])
-	case "setup":
-		return runGitSetup(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown git subcommand: %s", args[0])
 	}
@@ -211,76 +209,27 @@ func gitCloneURL(apiHost string, projectID string, siteID string) (string, error
 	return base.String(), nil
 }
 
-// runGitSetup registers the credential helper for the configured host, then
-// prints the clone command. Scoped per host rather than globally so it cannot
-// affect credentials for github.com or anything else.
-func runGitSetup(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("git setup", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
-	global := fs.Bool("global", true, "write to the global git config; --global=false writes to the repository config")
-	if err := fs.Parse(args); err != nil {
-		return err
+// gitCredentialConfigArgs builds the `-c` settings that make the cloned repository
+// authenticate on its own.
+//
+// `git clone -c` persists these into the new repository's config, which is what lets
+// cloning through creght be the whole setup: nothing outside that repo is touched,
+// and no machine-wide step is needed.
+//
+// The empty value has to come FIRST. credential.<url>.helper is multi-valued and
+// inherits from the system config, so on macOS osxkeychain is usually already in the
+// list and answers before we do — a token refreshed by `creght login` would lose to a
+// stale keychain entry, and the keychain's store step fails noisily besides. An empty
+// value resets the inherited list, and because the key is URL-scoped it only affects
+// this host; credentials for github.com and everything else are untouched.
+func gitCredentialConfigArgs(apiHost string) []string {
+	key := "credential." + strings.TrimRight(canonicalAPIHost(apiHost), "/") + ".helper"
+	return []string{
+		"-c", key + "=",
+		"-c", key + "=" + gitCredentialHelperValue(),
 	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	host := canonicalAPIHost(cfg.APIHost)
-
-	key := "credential." + strings.TrimRight(host, "/") + ".helper"
-	value := gitCredentialHelperValue()
-
-	// credential.helper is multi-valued and inherits from the system config, so
-	// on macOS osxkeychain is usually already in the list. Two problems with
-	// leaving it there: it answers first, so a token refreshed by `creght login`
-	// loses to a stale keychain entry; and its store step fails noisily
-	// ("failed to store: -60006"). An empty value resets the inherited list, and
-	// because the key is URL-scoped this only affects this host — credentials
-	// for github.com and everything else are untouched.
-	for _, args := range [][]string{
-		{"--unset-all", key},
-		{"--add", key, ""},
-		{"--add", key, value},
-	} {
-		configArgs := []string{"config"}
-		if *global {
-			configArgs = append(configArgs, "--global")
-		}
-		configArgs = append(configArgs, args...)
-
-		cmd := exec.CommandContext(ctx, "git", configArgs...)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil && args[0] != "--unset-all" {
-			// --unset-all exits non-zero when the key was never set, which is
-			// the normal first-run case.
-			return fmt.Errorf("git config %s: %w", key, err)
-		}
-	}
-
-	fmt.Printf("Configured git credential helper for %s\n", host)
-
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
-	if err != nil {
-		// Setup succeeded; not being in a workspace is not a failure.
-		fmt.Println("Run `creght git url` inside a pulled workspace to get the clone URL.")
-		return nil
-	}
-	cloneURL, err := gitCloneURL(cfg.APIHost, projectID, realSiteID)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\n  git clone %s\n", cloneURL)
-	return nil
 }
 
-// gitCredentialHelperValue builds the credential.helper value. The "!" prefix
-// tells git the value is a command line rather than a git-credential-<name>
-// binary.
-//
-// Backslashes are converted because git runs the helper through its bundled sh
-// even on Windows, where a raw C:\path\creght.exe would have its separators
-// eaten as escapes.
 func gitCredentialHelperValue() string {
 	self, err := os.Executable()
 	if err != nil {
@@ -350,15 +299,8 @@ func runGitClone(ctx context.Context, args []string) error {
 		return err
 	}
 
-	key := "credential." + strings.TrimRight(canonicalAPIHost(cfg.APIHost), "/") + ".helper"
-	// The empty value first resets helpers inherited from the system config
-	// (osxkeychain on macOS, Git Credential Manager on Windows) for this URL only.
-	gitArgs := []string{
-		"clone",
-		"-c", key + "=",
-		"-c", key + "=" + gitCredentialHelperValue(),
-		cloneURL,
-	}
+	gitArgs := append([]string{"clone"}, gitCredentialConfigArgs(cfg.APIHost)...)
+	gitArgs = append(gitArgs, cloneURL)
 	if fs.NArg() == 1 {
 		gitArgs = append(gitArgs, fs.Arg(0))
 	}
