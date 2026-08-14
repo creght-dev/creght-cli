@@ -239,7 +239,7 @@ func TestSaveConfigPreservesTokensForOtherAPIHosts(t *testing.T) {
 // CREGHT_API_HOST a per-command override: a login prefixed with it must add that
 // host's token without redirecting every later command to it.
 func TestSaveConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTempConfigDir(t)
 	t.Setenv("CREGHT_API_HOST", "https://creght.com")
 
 	writeTestConfig(t, `{
@@ -268,7 +268,7 @@ func TestSaveConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
 }
 
 func TestSaveConfigOnFirstLoginWithEnvRecordsBuiltInDefault(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTempConfigDir(t)
 	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
 
 	err := saveConfig(Config{APIHost: "http://localhost:8433", Token: "local-token"})
@@ -289,7 +289,7 @@ func TestSaveConfigOnFirstLoginWithEnvRecordsBuiltInDefault(t *testing.T) {
 }
 
 func TestDeleteConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTempConfigDir(t)
 	t.Setenv("CREGHT_API_HOST", "https://creght.com")
 
 	writeTestConfig(t, `{
@@ -322,7 +322,7 @@ func TestDeleteConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
 // replacement is not whichever host map iteration happened to reach first.
 func TestDeleteConfigMovesRemovedDefaultDeterministically(t *testing.T) {
 	for i := 0; i < 8; i++ {
-		t.Setenv("HOME", t.TempDir())
+		useTempConfigDir(t)
 
 		writeTestConfig(t, `{
 			"api_host": "https://creght.cn",
@@ -349,7 +349,7 @@ func TestDeleteConfigMovesRemovedDefaultDeterministically(t *testing.T) {
 }
 
 func TestRunConfigSetMovesDefaultAPIHostDespiteEnv(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTempConfigDir(t)
 	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
 
 	writeTestConfig(t, `{
@@ -397,7 +397,7 @@ func TestRunConfigSetRejectsBadInput(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			useTempConfigDir(t)
 
 			err := runConfig(context.Background(), tc.args)
 			if err == nil {
@@ -411,7 +411,7 @@ func TestRunConfigSetRejectsBadInput(t *testing.T) {
 }
 
 func TestRunConfigGetReportsSavedDefaultAndEnvOverride(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	useTempConfigDir(t)
 	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
 
 	writeTestConfig(t, `{"api_host":"https://creght.cn","token":"cn-token"}`)
@@ -427,6 +427,30 @@ func TestRunConfigGetReportsSavedDefaultAndEnvOverride(t *testing.T) {
 	}
 	if !strings.Contains(output, "CREGHT_API_HOST=http://localhost:8433 overrides it for this command only") {
 		t.Fatalf("output = %q, want the override note", output)
+	}
+}
+
+// useTempConfigDir points configPath() at a directory of this test's own, and
+// fails if it did not land there.
+//
+// Overriding HOME alone is not enough: os.UserConfigDir prefers XDG_CONFIG_HOME
+// on Linux, and GitHub's runners set it, so HOME-only tests all share one real
+// config file there and leak state into each other. That is invisible on macOS,
+// where HOME does decide the path — it cost a red CI run to find, hence the
+// check rather than just the two Setenv calls.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+
+	path, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if !strings.HasPrefix(path, dir+string(os.PathSeparator)) {
+		t.Fatalf("config path %q escaped the test dir %q; the test would read the real config", path, dir)
 	}
 }
 
