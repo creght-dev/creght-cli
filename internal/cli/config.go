@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -65,12 +66,20 @@ func loadConfig() (Config, error) {
 	return cfg, nil
 }
 
+// saveConfig stores cfg's token under its API host, leaving every other host's
+// token intact.
+//
+// The saved default (api_host) is deliberately not moved when the host came from
+// CREGHT_API_HOST. That variable is a per-invocation override, so
+// `CREGHT_API_HOST=https://creght.com creght login` should add a token for
+// creght.com and nothing more — a later bare `creght project list` must still
+// talk to whatever default the user chose. Use `creght config set api_host=...`
+// to move the default on purpose.
 func saveConfig(cfg Config) error {
 	cfg.APIHost = canonicalAPIHost(cfg.APIHost)
 	if cfg.APIHost == "" {
-		cfg.APIHost = defaultAPIHost()
+		cfg.APIHost = canonicalAPIHost(defaultAPIHost())
 	}
-	cfg.APIHost = canonicalAPIHost(cfg.APIHost)
 
 	existing, err := loadRawConfig()
 	if err != nil {
@@ -91,8 +100,16 @@ func saveConfig(cfg Config) error {
 		existing.Tokens[cfg.APIHost] = token
 	}
 
-	existing.APIHost = cfg.APIHost
-	existing.Token = existing.Tokens[cfg.APIHost]
+	if _, fromEnv := envAPIHost(); !fromEnv {
+		existing.APIHost = cfg.APIHost
+	}
+	if existing.APIHost == "" {
+		// First write on this machine while the env var is set: record the
+		// built-in default rather than the override, so the file never picks up
+		// a host the user only meant for one command.
+		existing.APIHost = canonicalAPIHost(defaultAPIHostValue)
+	}
+	existing.Token = existing.Tokens[existing.APIHost]
 	cfg = existing
 
 	path, err := configPath()
@@ -103,6 +120,15 @@ func saveConfig(cfg Config) error {
 	return writeConfig(path, cfg)
 }
 
+// deleteConfig forgets the token for the API host in play, keeping every other
+// host's token. The file itself is removed only once no token is left.
+//
+// The saved default stays where it is: logging out of a host named by
+// CREGHT_API_HOST must not repoint the default at that host — and, once its
+// token is gone, must not repoint it at some arbitrary other host either. The
+// default moves only when it is itself the host being logged out of, and then to
+// the lowest-sorted remaining host so the result does not depend on Go's
+// randomized map iteration order.
 func deleteConfig() error {
 	cfg, err := loadRawConfig()
 	if err != nil {
@@ -123,15 +149,11 @@ func deleteConfig() error {
 		delete(cfg.Tokens, apiHost)
 
 		if len(cfg.Tokens) > 0 {
-			cfg.APIHost = apiHost
-			cfg.Token = cfg.Tokens[apiHost]
-			if cfg.Token == "" {
-				for host, token := range cfg.Tokens {
-					cfg.APIHost = host
-					cfg.Token = token
-					break
-				}
+			if canonicalAPIHost(cfg.APIHost) == apiHost {
+				cfg.APIHost = lowestAPIHost(cfg.Tokens)
 			}
+			cfg.APIHost = canonicalAPIHost(cfg.APIHost)
+			cfg.Token = cfg.Tokens[cfg.APIHost]
 			return writeConfig(path, cfg)
 		}
 	}
@@ -202,6 +224,21 @@ func writeConfig(path string, cfg Config) error {
 	}
 
 	return nil
+}
+
+// lowestAPIHost picks a saved host deterministically, so which login becomes the
+// new default never depends on map iteration order.
+func lowestAPIHost(tokens map[string]string) string {
+	hosts := make([]string, 0, len(tokens))
+	for host := range tokens {
+		hosts = append(hosts, host)
+	}
+	if len(hosts) == 0 {
+		return ""
+	}
+	sort.Strings(hosts)
+
+	return hosts[0]
 }
 
 func tokenForAPIHost(cfg Config, apiHost string, legacyAPIHost string) string {

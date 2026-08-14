@@ -54,8 +54,12 @@ three-way merge, pushes local changes back to Creght, resolves conflicts,
 opens previews, and publishes sites.
 
 Current API host: %s
-Set a different one with the CREGHT_API_HOST environment variable, e.g.
+Override it for a single command with the CREGHT_API_HOST environment variable,
+e.g.
   CREGHT_API_HOST=http://localhost:8433 creght project list
+The variable applies to that one command only and never changes the saved
+default, so a login made under it does not redirect later commands. Use
+creght config set api_host=<url> to move the default itself.
 
 Credentials file: %s
 It stores one token per API host; creght logout removes the token for the
@@ -74,6 +78,7 @@ current API host only.`, helpAPIHost(), helpConfigPath()),
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"logout"}, "logout", "Remove the saved CLI login for the current API host.", func(ctx context.Context, args []string) error {
 		return runLogout(ctx, args)
 	}, nil))
+	root.AddCommand(configCommand(ctx, rawArgs))
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,
 		withLong(`Download a Creght site into a local workspace and record a base snapshot in
@@ -396,6 +401,48 @@ func loginCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Creght and save a CLI token for the current API host.", runLogin, func(flags *pflag.FlagSet) {
 		flags.String("web", "", "Creght web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or https://creght.cn.")
 	})
+}
+
+func configCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Show or change the saved default API host.",
+		Long: strings.TrimSpace(`Show or change the API host the CLI talks to when CREGHT_API_HOST is not set.
+
+CREGHT_API_HOST overrides the host for the command it is set on and nothing
+else — including creght login, which saves a token for that host without
+repointing the default. This command is the deliberate way to move the default,
+so switching sites is never a side effect of one prefixed command.
+
+Tokens are kept per API host, so changing api_host between hosts you have logged
+in to needs no new login.
+
+api_host is currently the only settable key.`),
+		Example: strings.TrimSpace(`  creght config get
+  creght config set api_host=https://creght.cn
+  creght config set api_host=http://localhost:8433`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfig(ctx, originalArgsAfter(rawArgs, []string{"config"}))
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"config"}, "get [key]", "Print the saved default API host.", runConfig, nil,
+		withLong(`Print the saved default API host — the one used by commands run without
+CREGHT_API_HOST. When that variable is set to something else, the value it
+overrides the default with for the current command is noted underneath.`),
+		withExample(`  creght config get
+  creght config get api_host`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"config"}, "set <key>=<value>", "Change the saved default API host.", runConfig, nil,
+		withLong(`Change the saved default API host, which every command run without
+CREGHT_API_HOST then uses.
+
+The value must be an absolute URL (https://creght.cn, http://localhost:8433).
+Existing tokens are untouched, so setting the host to one already logged in to
+needs no new login; setting it to an unknown host says so, and creght login
+saves the token for it.`),
+		withExample(`  creght config set api_host=https://creght.cn
+  creght config set api_host=http://localhost:8433`)))
+
+	return cmd
 }
 
 func projectCommand(ctx context.Context, rawArgs []string) *cobra.Command {

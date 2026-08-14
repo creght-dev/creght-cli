@@ -228,6 +228,240 @@ func TestSaveConfigPreservesTokensForOtherAPIHosts(t *testing.T) {
 	if cfg.Token != "com-token" {
 		t.Fatalf("Token = %q, want com-token", cfg.Token)
 	}
+	// No CREGHT_API_HOST here, so the caller really did choose this host and the
+	// saved default follows it.
+	if cfg.APIHost != "https://creght.com" {
+		t.Fatalf("APIHost = %q, want https://creght.com", cfg.APIHost)
+	}
+}
+
+// TestSaveConfigKeepsDefaultAPIHostWhenEnvOverrides pins the rule that makes
+// CREGHT_API_HOST a per-command override: a login prefixed with it must add that
+// host's token without redirecting every later command to it.
+func TestSaveConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "https://creght.com")
+
+	writeTestConfig(t, `{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token"
+		}
+	}`)
+
+	err := saveConfig(Config{APIHost: "https://creght.com", Token: "com-token"})
+	if err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != "https://creght.cn" {
+		t.Fatalf("APIHost = %q, want https://creght.cn", cfg.APIHost)
+	}
+	if cfg.Token != "cn-token" {
+		t.Fatalf("Token = %q, want cn-token", cfg.Token)
+	}
+	if cfg.Tokens["https://creght.com"] != "com-token" {
+		t.Fatalf("com token = %q, want com-token", cfg.Tokens["https://creght.com"])
+	}
+}
+
+func TestSaveConfigOnFirstLoginWithEnvRecordsBuiltInDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
+
+	err := saveConfig(Config{APIHost: "http://localhost:8433", Token: "local-token"})
+	if err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != defaultAPIHostValue {
+		t.Fatalf("APIHost = %q, want %s", cfg.APIHost, defaultAPIHostValue)
+	}
+	if cfg.Tokens["http://localhost:8433"] != "local-token" {
+		t.Fatalf("local token = %q, want local-token", cfg.Tokens["http://localhost:8433"])
+	}
+	if cfg.Token != "" {
+		t.Fatalf("Token = %q, want empty", cfg.Token)
+	}
+}
+
+func TestDeleteConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "https://creght.com")
+
+	writeTestConfig(t, `{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token",
+			"https://creght.com": "com-token"
+		}
+	}`)
+
+	if err := deleteConfig(); err != nil {
+		t.Fatalf("deleteConfig: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != "https://creght.cn" {
+		t.Fatalf("APIHost = %q, want https://creght.cn", cfg.APIHost)
+	}
+	if cfg.Token != "cn-token" {
+		t.Fatalf("Token = %q, want cn-token", cfg.Token)
+	}
+	if _, ok := cfg.Tokens["https://creght.com"]; ok {
+		t.Fatalf("com token still saved")
+	}
+}
+
+// TestDeleteConfigMovesRemovedDefaultDeterministically covers the one case where
+// the default does have to move — it was the host logged out of — and checks the
+// replacement is not whichever host map iteration happened to reach first.
+func TestDeleteConfigMovesRemovedDefaultDeterministically(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		t.Setenv("HOME", t.TempDir())
+
+		writeTestConfig(t, `{
+			"api_host": "https://creght.cn",
+			"token": "cn-token",
+			"tokens": {
+				"https://creght.cn": "cn-token",
+				"https://creght.com": "com-token",
+				"https://talizen.com": "talizen-token"
+			}
+		}`)
+
+		if err := deleteConfig(); err != nil {
+			t.Fatalf("deleteConfig: %v", err)
+		}
+
+		cfg := readTestConfig(t)
+		if cfg.APIHost != "https://creght.com" {
+			t.Fatalf("APIHost = %q, want https://creght.com", cfg.APIHost)
+		}
+		if cfg.Token != "com-token" {
+			t.Fatalf("Token = %q, want com-token", cfg.Token)
+		}
+	}
+}
+
+func TestRunConfigSetMovesDefaultAPIHostDespiteEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
+
+	writeTestConfig(t, `{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token",
+			"https://creght.com": "com-token"
+		}
+	}`)
+
+	output := captureStdout(t, func() {
+		if err := runConfig(context.Background(), []string{"set", "api_host=https://creght.com/"}); err != nil {
+			t.Fatalf("runConfig set: %v", err)
+		}
+	})
+	if !strings.Contains(output, "api_host\thttps://creght.com") {
+		t.Fatalf("output = %q", output)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != "https://creght.com" {
+		t.Fatalf("APIHost = %q, want https://creght.com", cfg.APIHost)
+	}
+	if cfg.Token != "com-token" {
+		t.Fatalf("Token = %q, want com-token", cfg.Token)
+	}
+	if cfg.Tokens["https://creght.cn"] != "cn-token" {
+		t.Fatalf("cn token = %q, want cn-token", cfg.Tokens["https://creght.cn"])
+	}
+}
+
+func TestRunConfigSetRejectsBadInput(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown key", []string{"set", "web_host=https://creght.cn"}, "only settable key is api_host"},
+		{"no value", []string{"set", "api_host"}, "expects <key>=<value>"},
+		{"empty value", []string{"set", "api_host="}, "invalid api_host"},
+		{"not a url", []string{"set", "api_host=creght.cn"}, "invalid api_host"},
+		{"unknown subcommand", []string{"reset"}, "unknown config subcommand"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+
+			err := runConfig(context.Background(), tc.args)
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunConfigGetReportsSavedDefaultAndEnvOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
+
+	writeTestConfig(t, `{"api_host":"https://creght.cn","token":"cn-token"}`)
+
+	output := captureStdout(t, func() {
+		if err := runConfig(context.Background(), []string{"get"}); err != nil {
+			t.Fatalf("runConfig get: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "api_host\thttps://creght.cn") {
+		t.Fatalf("output = %q, want the saved default", output)
+	}
+	if !strings.Contains(output, "CREGHT_API_HOST=http://localhost:8433 overrides it for this command only") {
+		t.Fatalf("output = %q, want the override note", output)
+	}
+}
+
+func writeTestConfig(t *testing.T, content string) {
+	t.Helper()
+
+	path, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func readTestConfig(t *testing.T) Config {
+	t.Helper()
+
+	path, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath: %v", err)
+	}
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(bs, &cfg); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+
+	return cfg
 }
 
 func captureStdout(t *testing.T, fn func()) string {

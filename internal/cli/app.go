@@ -115,7 +115,17 @@ func runLogin(ctx context.Context, args []string) error {
 				return err
 			}
 
-			fmt.Println("Logged in.")
+			fmt.Printf("Logged in to %s.\n", canonicalAPIHost(cfg.APIHost))
+			if _, fromEnv := envAPIHost(); fromEnv {
+				// The token was saved for this host, but the default was not
+				// moved. Say so, or the next bare command silently talking to a
+				// different host looks like a bug.
+				if saved, err := loadRawConfig(); err == nil && canonicalAPIHost(saved.APIHost) != canonicalAPIHost(cfg.APIHost) {
+					fmt.Printf("Default API host is still %s; keep setting CREGHT_API_HOST, "+
+						"or run creght config set api_host=%s to switch it.\n",
+						canonicalAPIHost(saved.APIHost), canonicalAPIHost(cfg.APIHost))
+				}
+			}
 			return nil
 		}
 		if result.Status == "expired" {
@@ -172,6 +182,113 @@ func runLogout(ctx context.Context, args []string) error {
 	} else {
 		fmt.Println("Logged out.")
 	}
+	return nil
+}
+
+// runConfig backs `creght config`, the one way to move the saved default API
+// host. CREGHT_API_HOST deliberately does not move it (see saveConfig), so
+// without this command a default chosen at first login could never be changed.
+func runConfig(_ context.Context, args []string) error {
+	if len(args) == 0 {
+		return runConfigGet(nil)
+	}
+
+	switch args[0] {
+	case "get":
+		return runConfigGet(args[1:])
+	case "set":
+		return runConfigSet(args[1:])
+	default:
+		return fmt.Errorf("unknown config subcommand: %s", args[0])
+	}
+}
+
+func runConfigGet(args []string) error {
+	fs := flag.NewFlagSet("config get", flag.ContinueOnError)
+	err := fs.Parse(args)
+	if err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("config get takes at most one key")
+	}
+	if fs.NArg() == 1 {
+		if err := checkConfigKey(fs.Arg(0)); err != nil {
+			return err
+		}
+	}
+
+	saved, err := loadRawConfig()
+	if err != nil {
+		return err
+	}
+	savedHost := canonicalAPIHost(saved.APIHost)
+	if savedHost == "" {
+		savedHost = canonicalAPIHost(defaultAPIHostValue)
+	}
+
+	fmt.Printf("api_host\t%s\n", savedHost)
+	if envHost, ok := envAPIHost(); ok && canonicalAPIHost(envHost) != savedHost {
+		fmt.Printf("  CREGHT_API_HOST=%s overrides it for this command only\n", canonicalAPIHost(envHost))
+	}
+
+	return nil
+}
+
+func runConfigSet(args []string) error {
+	fs := flag.NewFlagSet("config set", flag.ContinueOnError)
+	err := fs.Parse(args)
+	if err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("config set takes one <key>=<value> argument, e.g. creght config set api_host=https://creght.cn")
+	}
+
+	key, value, ok := strings.Cut(fs.Arg(0), "=")
+	if !ok {
+		return fmt.Errorf("config set expects <key>=<value>, e.g. creght config set api_host=https://creght.cn")
+	}
+	if err := checkConfigKey(key); err != nil {
+		return err
+	}
+
+	apiHost := canonicalAPIHost(value)
+	u, parseErr := url.Parse(apiHost)
+	if apiHost == "" || parseErr != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("invalid api_host %q: want an absolute URL such as https://creght.cn", strings.TrimSpace(value))
+	}
+
+	// Written straight through rather than via saveConfig, which refuses to move
+	// the default while CREGHT_API_HOST is set. Moving it is this command's job.
+	cfg, err := loadRawConfig()
+	if err != nil {
+		return err
+	}
+	cfg.APIHost = apiHost
+	cfg.Token = cfg.Tokens[apiHost]
+
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	if err := writeConfig(path, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("api_host\t%s\n", apiHost)
+	if cfg.Token == "" {
+		fmt.Println("No saved login for this host yet; run creght login.")
+	}
+
+	return nil
+}
+
+func checkConfigKey(key string) error {
+	if strings.TrimSpace(key) != "api_host" {
+		return fmt.Errorf("unknown config key %q; the only settable key is api_host", strings.TrimSpace(key))
+	}
+
 	return nil
 }
 
