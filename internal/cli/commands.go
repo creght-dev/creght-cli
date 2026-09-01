@@ -48,28 +48,15 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		Short:         "Local bridge for Creght site code",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Long: fmt.Sprintf(`Creght CLI authenticates with Creght, lists projects and sites,
-pulls remote site files (including Func code) into a local workspace with
-three-way merge, pushes local changes back to Creght, resolves conflicts,
-opens previews, and publishes sites.
+		Long: fmt.Sprintf(`Local bridge for Creght site code: pull a site into a workspace, edit, diff, push, preview, publish.
 
 %s
 
-The host is resolved most-specific-first: the CREGHT_API_HOST environment
-variable, then the api_host recorded in .creght/state.json by the workspace the
-working directory sits in, then the saved default, then the built-in one. So
-commands run inside a pulled workspace reach the deployment it came from without
-any prefix, even when the saved default names another. Override it for a single
-command with the environment variable, e.g.
-  CREGHT_API_HOST=http://localhost:8433 creght project list
-The variable applies to that one command only and changes neither the saved
-default nor the workspace's recorded host, so a login made under it does not
-redirect later commands. Use creght config set api_host=<url> to move the
-default itself.
+Host order: CREGHT_API_HOST, the workspace's .creght/state.json, the saved default, the built-in.
+CREGHT_API_HOST applies to one command and changes nothing saved; creght config set api_host=<url> moves the default.
 
 Credentials file: %s
-It stores one token per API host; creght logout removes the token for the
-current API host only.`, helpAPIHostBlock(), helpConfigPath()),
+One token per API host; creght logout removes only the current host's.`, helpAPIHostBlock(), helpConfigPath()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
