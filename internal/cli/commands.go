@@ -53,17 +53,23 @@ pulls remote site files (including Func code) into a local workspace with
 three-way merge, pushes local changes back to Creght, resolves conflicts,
 opens previews, and publishes sites.
 
-Current API host: %s
-Override it for a single command with the CREGHT_API_HOST environment variable,
-e.g.
+%s
+
+The host is resolved most-specific-first: the CREGHT_API_HOST environment
+variable, then the api_host recorded in .creght/state.json by the workspace the
+working directory sits in, then the saved default, then the built-in one. So
+commands run inside a pulled workspace reach the deployment it came from without
+any prefix, even when the saved default names another. Override it for a single
+command with the environment variable, e.g.
   CREGHT_API_HOST=http://localhost:8433 creght project list
-The variable applies to that one command only and never changes the saved
-default, so a login made under it does not redirect later commands. Use
-creght config set api_host=<url> to move the default itself.
+The variable applies to that one command only and changes neither the saved
+default nor the workspace's recorded host, so a login made under it does not
+redirect later commands. Use creght config set api_host=<url> to move the
+default itself.
 
 Credentials file: %s
 It stores one token per API host; creght logout removes the token for the
-current API host only.`, helpAPIHost(), helpConfigPath()),
+current API host only.`, helpAPIHostBlock(), helpConfigPath()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
@@ -79,6 +85,21 @@ current API host only.`, helpAPIHost(), helpConfigPath()),
 		return runLogout(ctx, args)
 	}, nil))
 	root.AddCommand(configCommand(ctx, rawArgs))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"update"}, "update", "Update the CLI to the latest release.", runUpdate, func(flags *pflag.FlagSet) {
+		flags.Bool("check", false, "Report the latest release without installing it.")
+	},
+		withLong(`Update this CLI in place to the newest published release.
+
+The install is detected, not assumed. A binary vendored by the npm package is
+updated by running npm install -g creght-cli@<version>, so the package's own
+metadata stays consistent; a standalone binary is replaced directly with the
+release archive for this platform, after its SHA-256 is checked against the
+release checksums.
+
+--check reports the installed and latest versions and installs nothing. A local
+dev build is never overwritten.`),
+		withExample(`  creght update
+  creght update --check`)))
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,
 		withLong(`Download a Creght site into a local workspace and record a base snapshot in
@@ -89,6 +110,9 @@ Func keys map to backend/func/ (e.g. booking <-> backend/func/booking.ts).
 
 Without --dir, pull discovers .creght/state.json from the current directory or
 its parents and reuses its site_id. The first pull still requires --site_id.
+It also records the API host it pulled from in .creght/state.json, so later
+commands in that directory reach the same deployment without CREGHT_API_HOST.
+The recorded host is written once and never rewritten.
 Without a path it merges the whole site; with an optional <path> it pulls just
 that one file and updates only its base state.
 
@@ -332,13 +356,17 @@ Applied as one batch, so a failure cannot leave the site half rolled back.`),
 	return cmd
 }
 
-func helpAPIHost() string {
-	cfg, err := loadConfig()
-	if err == nil && strings.TrimSpace(cfg.APIHost) != "" {
-		return strings.TrimSpace(cfg.APIHost)
+// helpAPIHostBlock reports the host commands will talk to and where that host
+// came from. Naming the source is the point: an auto-discovered host is
+// otherwise indistinguishable from a saved default, and the two can disagree.
+func helpAPIHostBlock() string {
+	resolved := currentAPIHost()
+	host := strings.TrimSpace(resolved.Host)
+	if host == "" {
+		host = defaultAPIHost()
 	}
 
-	return defaultAPIHost()
+	return fmt.Sprintf("Current API host: %s\n  source: %s", host, resolved.describe())
 }
 
 // helpConfigPath reports where the CLI keeps its saved login tokens, so

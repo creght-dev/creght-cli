@@ -33,8 +33,10 @@ func loadConfig() (Config, error) {
 
 	bs, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		// No saved default yet, but the environment or the surrounding
+		// workspace may still name a host.
 		return Config{
-			APIHost: canonicalAPIHost(defaultAPIHost()),
+			APIHost: resolveAPIHost("").Host,
 		}, nil
 	}
 	if err != nil {
@@ -52,13 +54,7 @@ func loadConfig() (Config, error) {
 		legacyAPIHost = defaultAPIHost()
 	}
 
-	if apiHost, ok := envAPIHost(); ok {
-		cfg.APIHost = apiHost
-	}
-	if cfg.APIHost == "" {
-		cfg.APIHost = defaultAPIHost()
-	}
-	cfg.APIHost = canonicalAPIHost(cfg.APIHost)
+	cfg.APIHost = resolveAPIHost(cfg.APIHost).Host
 
 	token := tokenForAPIHost(cfg, cfg.APIHost, legacyAPIHost)
 	cfg.Token = token
@@ -69,12 +65,14 @@ func loadConfig() (Config, error) {
 // saveConfig stores cfg's token under its API host, leaving every other host's
 // token intact.
 //
-// The saved default (api_host) is deliberately not moved when the host came from
-// CREGHT_API_HOST. That variable is a per-invocation override, so
-// `CREGHT_API_HOST=https://creght.com creght login` should add a token for
-// creght.com and nothing more — a later bare `creght project list` must still
-// talk to whatever default the user chose. Use `creght config set api_host=...`
-// to move the default on purpose.
+// The saved default (api_host) is deliberately not moved when the host was
+// discovered rather than chosen — see apiHostSource.implicit. Both
+// CREGHT_API_HOST and a workspace's recorded host are scoped, so
+// `CREGHT_API_HOST=https://creght.com creght login`, or a login run inside a
+// workspace pulled from another deployment, should add that host's token and
+// nothing more: a later bare `creght project list` elsewhere must still talk to
+// whatever default the user chose. Use `creght config set api_host=...` to move
+// the default on purpose.
 func saveConfig(cfg Config) error {
 	cfg.APIHost = canonicalAPIHost(cfg.APIHost)
 	if cfg.APIHost == "" {
@@ -100,13 +98,13 @@ func saveConfig(cfg Config) error {
 		existing.Tokens[cfg.APIHost] = token
 	}
 
-	if _, fromEnv := envAPIHost(); !fromEnv {
+	if !resolveAPIHost(existing.APIHost).Source.implicit() {
 		existing.APIHost = cfg.APIHost
 	}
 	if existing.APIHost == "" {
-		// First write on this machine while the env var is set: record the
-		// built-in default rather than the override, so the file never picks up
-		// a host the user only meant for one command.
+		// First write on this machine while an implicit host is in play: record
+		// the built-in default rather than the discovered host, so the file
+		// never picks up a host meant for one command or one directory.
 		existing.APIHost = canonicalAPIHost(defaultAPIHostValue)
 	}
 	existing.Token = existing.Tokens[existing.APIHost]

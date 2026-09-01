@@ -25,6 +25,17 @@ Optional:
 mv ./creght /usr/local/bin/creght
 ```
 
+## Update
+
+Update the CLI in place to the newest published release:
+
+```bash
+creght update
+creght update --check   # report versions, install nothing
+```
+
+The install method is detected, not assumed. A binary vendored by the npm package is updated by running `npm install -g creght-cli@<version>`, so the package's own metadata stays consistent with the binary; a standalone binary is replaced directly with the release archive for the running platform, after its SHA-256 is verified against the release checksums. A local `go build` reports `dev` and is never overwritten.
+
 ## Login
 
 For production:
@@ -47,7 +58,7 @@ The command opens a browser authorization page. After authorization succeeds, th
 
 The config file contains the default API host and CLI tokens. Tokens are stored per API host, so logging in to `https://creght.cn`, `https://creght.com`, or a local backend does not overwrite the other hosts' login state.
 
-`CREGHT_API_HOST` applies to the single command it is set on and never changes the saved default. A login prefixed with it saves a token for that host and leaves the default alone, so a later bare `creght project list` still talks to the default host. To switch hosts for good, see [Default API Host](#default-api-host).
+`CREGHT_API_HOST` applies to the single command it is set on and never changes the saved default or a workspace's recorded host. A login prefixed with it saves a token for that host and leaves the default alone, so a later bare `creght project list` still talks to the default host. A login run inside a pulled workspace behaves the same way. See [API Host](#api-host) for the full resolution order.
 
 When `--web` is omitted, the CLI uses `CREGHT_WEB_HOST` if set. For local API hosts such as `localhost` or `127.0.0.1`, it defaults to `http://localhost:5173`.
 For production, the default API host and default web host are both `https://creght.cn`.
@@ -64,9 +75,42 @@ When `CREGHT_API_HOST` is set, `logout` removes only that host's token. Other sa
 
 Logging out does not move the default API host either, unless the default is the host being logged out of.
 
-## Default API Host
+## API Host
 
-Commands run without `CREGHT_API_HOST` use the saved default API host, `https://creght.cn` until it is changed. Show it, and any override in effect:
+The host a command talks to is resolved most-specific-first:
+
+| Order | Source | Scope |
+| --- | --- | --- |
+| 1 | `CREGHT_API_HOST` environment variable | the one command it prefixes |
+| 2 | `api_host` in `.creght/state.json`, discovered from the working directory or its parents | that workspace |
+| 3 | the saved default (`creght config set api_host`) | this machine |
+| 4 | the built-in default, `https://creght.cn` | — |
+
+`creght -h` prints the host in effect and names which of the four it came from, giving the directory when it was auto-discovered:
+
+```text
+Current API host: https://talizen.com
+  source: auto-discovered from workspace /Users/me/sites/talizen (.creght/state.json)
+```
+
+### Workspace auto-discovery
+
+`creght pull` records the host it pulled from in `.creght/state.json`, so every later command inside that directory — or any subdirectory of it — reaches the same deployment with no prefix, even when the saved default names another:
+
+```bash
+CREGHT_API_HOST=https://talizen.com creght pull --site_id=<pid>/<sid> --dir=./mysite
+cd ./mysite
+creght diff     # talks to https://talizen.com, no prefix needed
+creght push
+```
+
+The recorded host is written once, on the first state write, and never rewritten afterwards. That is what keeps a one-off `CREGHT_API_HOST` override from silently repointing a workspace at another deployment. When an override disagrees with the recorded host, `pull`, `diff`, and `push` print a warning on stderr and then honor the override.
+
+Workspaces pulled by CLI versions before auto-discovery have no recorded host and fall through to the saved default, exactly as before. Pulling once records it.
+
+### Saved default
+
+Commands outside any workspace, and with no environment override, use the saved default — `https://creght.cn` until it is changed. Show it, along with any override or auto-discovery in effect:
 
 ```bash
 creght config get
@@ -79,7 +123,7 @@ creght config set api_host=https://creght.com
 creght config set api_host=http://localhost:8433
 ```
 
-This is the only thing that moves the default — neither `login` nor `logout` under `CREGHT_API_HOST` does. Tokens are kept per API host, so switching to a host already logged in to needs no new login.
+This is the only thing that moves the default. Neither `login` nor `logout` does, whether the host came from `CREGHT_API_HOST` or from a workspace. Tokens are kept per API host, so switching to a host already logged in to needs no new login.
 
 ## List Projects
 
@@ -651,7 +695,7 @@ Command meanings:
 
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
-- `config`: Show (`config get`) or change (`config set api_host=<url>`) the default API host used when `CREGHT_API_HOST` is not set.
+- `config`: Show (`config get`) or change (`config set api_host=<url>`) the saved default API host, used when neither `CREGHT_API_HOST` nor a workspace's recorded host applies.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
@@ -664,6 +708,7 @@ Command meanings:
 - `table`: Manage project JSON tables and records used by Func.
 - `func`: Run project Func backend code with sample input. Func code itself is edited as `backend/func` site files and synced with pull/push.
 - `upload`: Upload a local file as a Creght site asset and print its URL.
+- `update`: Update the CLI to the latest published release, or report versions with `--check`.
 - `version`: Print the installed CLI version. Subcommands manage site versions — immutable source snapshots: `version create` records one, `version list` shows them and which is live, `version publish` makes one live.
 
 ## Release

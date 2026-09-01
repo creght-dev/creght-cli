@@ -16,7 +16,11 @@ const stateFileName = "state.json"
 const baseDirName = "base"
 
 type workspaceState struct {
-	SiteID    string                `json:"site_id"`
+	SiteID string `json:"site_id"`
+	// APIHost is the Creght deployment this workspace was pulled from. It is
+	// what lets later commands here resolve the host without CREGHT_API_HOST;
+	// see resolveAPIHost. Empty in workspaces pulled by older CLI versions.
+	APIHost   string                `json:"api_host,omitempty"`
 	UpdatedAt string                `json:"updated_at"`
 	Files     map[string]stateEntry `json:"files"`
 }
@@ -212,8 +216,13 @@ func saveWorkspaceState(root string, siteID string, files map[string]snapshotEnt
 		return err
 	}
 	files = filterIgnoredSnapshot(ignore, files)
+	previous, _, err := loadWorkspaceState(root)
+	if err != nil {
+		return err
+	}
 	state := workspaceState{
 		SiteID:    siteID,
+		APIHost:   keepOrRecordAPIHost(previous.APIHost),
 		UpdatedAt: time.Now().Format(time.RFC3339Nano),
 		Files:     map[string]stateEntry{},
 	}
@@ -256,6 +265,7 @@ func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
 	if strings.TrimSpace(state.SiteID) == "" {
 		state.SiteID = siteID
 	}
+	state.APIHost = keepOrRecordAPIHost(state.APIHost)
 	state.Files[entry.Path] = stateEntry{Hash: entry.Hash, Readonly: entry.Readonly}
 	state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
 

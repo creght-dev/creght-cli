@@ -116,16 +116,7 @@ func runLogin(ctx context.Context, args []string) error {
 			}
 
 			fmt.Printf("Logged in to %s.\n", canonicalAPIHost(cfg.APIHost))
-			if _, fromEnv := envAPIHost(); fromEnv {
-				// The token was saved for this host, but the default was not
-				// moved. Say so, or the next bare command silently talking to a
-				// different host looks like a bug.
-				if saved, err := loadRawConfig(); err == nil && canonicalAPIHost(saved.APIHost) != canonicalAPIHost(cfg.APIHost) {
-					fmt.Printf("Default API host is still %s; keep setting CREGHT_API_HOST, "+
-						"or run creght config set api_host=%s to switch it.\n",
-						canonicalAPIHost(saved.APIHost), canonicalAPIHost(cfg.APIHost))
-				}
-			}
+			printImplicitHostNotice(canonicalAPIHost(cfg.APIHost))
 			return nil
 		}
 		if result.Status == "expired" {
@@ -134,6 +125,31 @@ func runLogin(ctx context.Context, args []string) error {
 	}
 
 	return fmt.Errorf("authorization timed out")
+}
+
+// printImplicitHostNotice explains why the saved default did not move after a
+// login against a discovered host. The token was saved for that host, but the
+// default stayed put — without a word about it, the next bare command talking to
+// a different host looks like a bug.
+func printImplicitHostNotice(loggedInHost string) {
+	saved, err := loadRawConfig()
+	if err != nil {
+		return
+	}
+	savedHost := canonicalAPIHost(saved.APIHost)
+	if savedHost == "" || savedHost == loggedInHost {
+		return
+	}
+
+	switch resolved := resolveAPIHost(saved.APIHost); resolved.Source {
+	case apiHostSourceEnv:
+		fmt.Printf("Default API host is still %s; keep setting CREGHT_API_HOST, "+
+			"or run creght config set api_host=%s to switch it.\n", savedHost, loggedInHost)
+	case apiHostSourceWorkspace:
+		fmt.Printf("Default API host is still %s; commands under %s auto-discover %s, "+
+			"or run creght config set api_host=%s to switch the default.\n",
+			savedHost, resolved.Workspace, resolved.Host, loggedInHost)
+	}
 }
 
 // runLogout revokes the token server-side, drops it from git's credential store,
@@ -228,8 +244,17 @@ func runConfigGet(args []string) error {
 	}
 
 	fmt.Printf("api_host\t%s\n", savedHost)
-	if envHost, ok := envAPIHost(); ok && canonicalAPIHost(envHost) != savedHost {
-		fmt.Printf("  CREGHT_API_HOST=%s overrides it for this command only\n", canonicalAPIHost(envHost))
+	// Only the source actually in effect is reported; naming the others would
+	// suggest more than one host is in play.
+	switch resolved := resolveAPIHost(saved.APIHost); resolved.Source {
+	case apiHostSourceEnv:
+		if resolved.Host != savedHost {
+			fmt.Printf("  CREGHT_API_HOST=%s overrides it for this command only\n", resolved.Host)
+		}
+	case apiHostSourceWorkspace:
+		if resolved.Host != savedHost {
+			fmt.Printf("  workspace %s auto-discovers %s from .creght/state.json\n", resolved.Workspace, resolved.Host)
+		}
 	}
 
 	return nil
@@ -388,6 +413,7 @@ func runPull(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") {
 		printWorkspaceNotice(*dir)
 	}
+	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -612,6 +638,7 @@ func runPush(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") {
 		printWorkspaceNotice(*dir)
 	}
+	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -666,6 +693,7 @@ func runDiff(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") && !*jsonOut {
 		printWorkspaceNotice(*dir)
 	}
+	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -811,6 +839,38 @@ func parseSiteRef(ref string) (string, string, error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+// warnAPIHostMismatch flags a sync about to run against a different deployment
+// than the workspace was pulled from.
+//
+// The override still applies — an explicit CREGHT_API_HOST outranks the recorded
+// host by design, and that escape hatch is the reason it ranks higher at all.
+// But aiming one site's files at another deployment should not happen silently,
+// so it costs a line on stderr, where it cannot corrupt `diff --json`.
+func warnAPIHostMismatch(root string) {
+	state, hasState, err := loadWorkspaceState(root)
+	if err != nil || !hasState {
+		return
+	}
+	recorded := canonicalAPIHost(strings.TrimSpace(state.APIHost))
+	if recorded == "" {
+		// Pulled by a CLI that did not record the host; there is nothing to
+		// disagree with.
+		return
+	}
+
+	resolved := currentAPIHost()
+	if resolved.Host == recorded {
+		return
+	}
+	if resolved.Source == apiHostSourceEnv {
+		fmt.Fprintf(os.Stderr, "warning: workspace %s was pulled from %s; CREGHT_API_HOST points this command at %s\n",
+			root, recorded, resolved.Host)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: workspace %s was pulled from %s, but this command uses %s (%s)\n",
+		root, recorded, resolved.Host, resolved.describe())
 }
 
 // printWorkspaceNotice reports which discovered workspace root a command
