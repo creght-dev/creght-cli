@@ -33,6 +33,46 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
+// FlexID holds a platform id that the API may send as either a JSON string or a
+// JSON number, and keeps it as text.
+//
+// The backend moved user ids to strings (they are snowflake ids around 2e18,
+// past what a JS double can hold, so a number would be silently rounded by any
+// browser client). Decoding those into int64 fails outright — that is what broke
+// every cms/form/table command at once, since resolving a --key lists the
+// collections first.
+//
+// Decoding accepts both forms so one CLI build works against a backend on either
+// side of that change. Text is the right resting form here: the CLI only ever
+// echoes these ids back out, never does arithmetic on them, and a string cannot
+// lose digits on the way through.
+type FlexID string
+
+func (f *FlexID) UnmarshalJSON(bs []byte) error {
+	trimmed := bytes.TrimSpace(bs)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		*f = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		*f = FlexID(s)
+		return nil
+	}
+
+	// json.Number rather than the raw bytes: it rejects true/{}/[] and any
+	// malformed number, so garbage cannot end up stored as an id.
+	var n json.Number
+	if err := json.Unmarshal(trimmed, &n); err != nil {
+		return fmt.Errorf("id must be a string or a number, got %s", trimmed)
+	}
+	*f = FlexID(n.String())
+	return nil
+}
+
 func (c *Client) do(ctx context.Context, method string, path string, query url.Values, body any, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -142,7 +182,7 @@ type CLIAuthSession struct {
 type CLIAuthSessionResult struct {
 	Status string `json:"status"`
 	Token  string `json:"token"`
-	UserID int64  `json:"user_id"`
+	UserID FlexID `json:"user_id"`
 }
 
 func (c *Client) CreateCLIAuthSession(ctx context.Context, webURL string) (CLIAuthSession, error) {
@@ -213,7 +253,7 @@ type ContentApp struct {
 	ID         string          `json:"id,omitempty"`
 	ProjectID  string          `json:"project_id,omitempty"`
 	Key        string          `json:"key,omitempty"`
-	UserID     int64           `json:"user_id,omitempty"`
+	UserID     FlexID          `json:"user_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
 	Desc       string          `json:"desc,omitempty"`
 	JsonSchema json.RawMessage `json:"json_schema,omitempty"`
@@ -247,7 +287,7 @@ type Content struct {
 	ID           string          `json:"id,omitempty"`
 	Slug         string          `json:"slug,omitempty"`
 	ContentAppID string          `json:"content_app_id,omitempty"`
-	UserID       int64           `json:"user_id,omitempty"`
+	UserID       FlexID          `json:"user_id,omitempty"`
 	JsonSchema   json.RawMessage `json:"json_schema,omitempty"`
 	Tags         []string        `json:"tags,omitempty"`
 	Status       string          `json:"status,omitempty"`
@@ -261,7 +301,7 @@ type Form struct {
 	ID         string          `json:"id,omitempty"`
 	ProjectID  string          `json:"project_id,omitempty"`
 	Key        string          `json:"key,omitempty"`
-	UserID     int64           `json:"user_id,omitempty"`
+	UserID     FlexID          `json:"user_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
 	Desc       string          `json:"desc,omitempty"`
 	JsonSchema json.RawMessage `json:"json_schema,omitempty"`
@@ -286,7 +326,7 @@ type ProjectTable struct {
 	ID         string          `json:"id,omitempty"`
 	ProjectID  string          `json:"project_id,omitempty"`
 	Key        string          `json:"key,omitempty"`
-	UserID     int64           `json:"user_id,omitempty"`
+	UserID     FlexID          `json:"user_id,omitempty"`
 	Name       string          `json:"name,omitempty"`
 	Desc       string          `json:"desc,omitempty"`
 	JsonSchema json.RawMessage `json:"json_schema,omitempty"`
@@ -298,7 +338,7 @@ type ProjectTable struct {
 type ProjectTableRecord struct {
 	ID        string          `json:"id,omitempty"`
 	TableID   string          `json:"table_id,omitempty"`
-	UserID    int64           `json:"user_id,omitempty"`
+	UserID    FlexID          `json:"user_id,omitempty"`
 	Body      json.RawMessage `json:"body,omitempty"`
 	Sort      *int            `json:"sort,omitempty"`
 	CreatedAt string          `json:"created_at,omitempty"`
