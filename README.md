@@ -167,6 +167,29 @@ creght project create --name="My Project" --from_id=<project_id>
 creght project create --name="My Project" --tpl_id=<template_id>
 ```
 
+## Site Templates
+
+Browse the platform's project templates and start a project from one. `list`
+and `get` show each template's name, description, categories, and a preview URL
+you can open to see the template rendered:
+
+```bash
+creght tpl list
+creght tpl list --category_id=<id> --limit=20
+creght tpl list --recommend
+creght tpl categories
+creght tpl get <template_id>
+```
+
+Every command accepts `--json` for machine-readable output.
+
+Once a template is chosen, create a project from it. The command prints the new
+project's sites in `project_id/site_id` form, ready for `creght pull`:
+
+```bash
+creght tpl use <template_id> --name="My Project"
+```
+
 ## Pull Site Workspace
 
 Download the current remote site workspace into a local directory:

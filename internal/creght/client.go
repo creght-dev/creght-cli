@@ -249,6 +249,102 @@ func (c *Client) CreateProject(ctx context.Context, project CreateProjectRequest
 	return ret.ID, nil
 }
 
+// TplCategory is one template category. Categories form two levels: Pid points
+// at the parent, 0 means top-level.
+type TplCategory struct {
+	ID          FlexID            `json:"id"`
+	Pid         FlexID            `json:"pid,omitempty"`
+	NameLocales map[string]string `json:"name_locales,omitempty"`
+	Icon        string            `json:"icon,omitempty"`
+}
+
+// Tpl carries the template metadata the CLI shows. Name/desc locale keys are
+// the platform's: "zh-CN", "zh-HK", "en".
+type Tpl struct {
+	ID          FlexID            `json:"id"`
+	Type        string            `json:"type,omitempty"`
+	Status      string            `json:"status,omitempty"`
+	Img         string            `json:"img,omitempty"`
+	NameLocales map[string]string `json:"name_locales,omitempty"`
+	DescLocales map[string]string `json:"desc_locales,omitempty"`
+	ViewCount   int64             `json:"view_count,omitempty"`
+	UseCount    int64             `json:"use_count,omitempty"`
+	Categories  []TplCategory     `json:"categories,omitempty"`
+	PreviewURL  string            `json:"preview_url,omitempty"`
+}
+
+type TplProject struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type TplSite struct {
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	FreeDomain string `json:"free_domain,omitempty"`
+}
+
+// ProjectTpl is one whole-project template: the template metadata plus the
+// project, sites, and CMS collections that creating from it copies.
+type ProjectTpl struct {
+	Tpl        Tpl          `json:"tpl"`
+	Project    TplProject   `json:"project"`
+	SiteList   []TplSite    `json:"site_list,omitempty"`
+	CmsList    []ContentApp `json:"cms_list,omitempty"`
+	PreviewURL string       `json:"preview_url,omitempty"`
+}
+
+type ProjectTplListResponse struct {
+	Total int64        `json:"total"`
+	List  []ProjectTpl `json:"list"`
+}
+
+func (c *Client) GetTplProjectList(ctx context.Context, query url.Values) (ProjectTplListResponse, error) {
+	var ret ProjectTplListResponse
+	err := c.do(ctx, http.MethodGet, "/api/u/tpl/project", query, nil, &ret)
+	if err != nil {
+		return ProjectTplListResponse{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetTplProjectRecommendList(ctx context.Context) (ProjectTplListResponse, error) {
+	var ret ProjectTplListResponse
+	err := c.do(ctx, http.MethodGet, "/api/u/tpl/project_recommend", nil, nil, &ret)
+	if err != nil {
+		return ProjectTplListResponse{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetTplProjectDetail(ctx context.Context, id string) (ProjectTpl, error) {
+	query := url.Values{}
+	query.Set("id", strings.TrimSpace(id))
+
+	var ret ProjectTpl
+	err := c.do(ctx, http.MethodGet, "/api/u/tpl/project_detail", query, nil, &ret)
+	if err != nil {
+		return ProjectTpl{}, err
+	}
+
+	return ret, nil
+}
+
+func (c *Client) GetTplCategoryList(ctx context.Context) ([]TplCategory, error) {
+	var ret struct {
+		List []TplCategory `json:"list"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/u/tpl_category_list", nil, nil, &ret)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret.List, nil
+}
+
 type ContentApp struct {
 	ID         string          `json:"id,omitempty"`
 	ProjectID  string          `json:"project_id,omitempty"`

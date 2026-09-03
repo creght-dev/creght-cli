@@ -88,6 +88,7 @@ dev build is never overwritten.`),
 		withExample(`  creght update
   creght update --check`)))
 	root.AddCommand(projectCommand(ctx, rawArgs))
+	root.AddCommand(tplCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,
 		withLong(`Download a Creght site into a local workspace and record a base snapshot in
 .creght/state.json for safe 3-way sync.
@@ -475,6 +476,28 @@ func projectCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return cmd
 }
 
+func tplCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "tpl",
+		Short: "Browse project templates and start a project from one.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTpl(ctx, originalArgsAfter(rawArgs, []string{"tpl"}))
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"tpl"}, "list", "List project templates: name, description, categories, preview URL.", runTpl, addTplListFlags,
+		withExample(`  creght tpl list
+  creght tpl list --category_id=3 --json
+  creght tpl list --recommend`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"tpl"}, "get <id>", "Show one template's details: sites, CMS collections, preview URL.", runTpl, addTplJSONFlag,
+		withExample(`  creght tpl get 12
+  creght tpl get 12 --json`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"tpl"}, "categories", "List template categories for filtering tpl list.", runTpl, addTplJSONFlag))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"tpl"}, "use <id>", "Create a new project from a template and print its sites, ready to pull.", runTpl, addTplUseFlags,
+		withExample(`  creght tpl use 12 --name="My website"
+  creght tpl use 12 --name="My website" --json`)))
+	return cmd
+}
+
 func siteCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
@@ -707,6 +730,23 @@ func addProjectCreateFlags(flags *pflag.FlagSet) {
 	flags.String("name", "", "Project name.")
 	flags.String("from_id", "", "Existing project id to copy.")
 	flags.Int64("tpl_id", 0, "Template id to use.")
+}
+
+func addTplListFlags(flags *pflag.FlagSet) {
+	flags.Int64("category_id", 0, "Filter by template category id.")
+	flags.Bool("recommend", false, "List the platform's recommended templates.")
+	flags.Int("limit", 50, "Result limit.")
+	flags.Int("offset", 0, "Result offset.")
+	flags.Bool("json", false, "Print the raw template list as JSON.")
+}
+
+func addTplJSONFlag(flags *pflag.FlagSet) {
+	flags.Bool("json", false, "Print the raw response as JSON.")
+}
+
+func addTplUseFlags(flags *pflag.FlagSet) {
+	flags.String("name", "", "Name for the new project.")
+	flags.Bool("json", false, "Print the created project and sites as JSON.")
 }
 
 func addListFlags(flags *pflag.FlagSet) {

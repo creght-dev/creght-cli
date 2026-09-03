@@ -28,20 +28,27 @@ func TestRunProjectCreate(t *testing.T) {
 
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		// The post-create site lookup is best-effort; return an empty list.
+		if r.URL.Path == "/api/u/project_list" {
+			_, _ = w.Write([]byte(`{"total":0,"list":[]}`))
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
 		if r.URL.Path != "/api/u/project" {
 			t.Fatalf("path = %s, want /api/u/project", r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Fatalf("Authorization = %q", got)
-		}
 
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"project_123"}`))
 	}))
 	defer server.Close()

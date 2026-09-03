@@ -392,6 +392,7 @@ func runProjectCreate(ctx context.Context, args []string) error {
 	}
 
 	fmt.Printf("Created project %s\t%s\n", id, projectName)
+	printProjectSites(id, lookupProjectSites(ctx, client, id))
 	return nil
 }
 
