@@ -20,6 +20,15 @@ func init() {
 }
 
 func Run(ctx context.Context, args []string) error {
+	// Auto-update, both halves: show the notice a background worker left, then
+	// maybe spawn the next worker. `creght update` itself is excluded so the
+	// worker cannot recurse and a manual update is not raced by an automatic
+	// one; dev builds and CREGHT_NO_AUTO_UPDATE opt out inside.
+	if len(args) == 0 || args[0] != "update" {
+		notifyAutoUpdate(os.Stderr)
+		startAutoUpdateIfDue()
+	}
+
 	if hasVersionArg(args) {
 		fmt.Fprintln(os.Stdout, version)
 		return nil
@@ -74,6 +83,8 @@ One token per API host; creght logout removes only the current host's.`, helpAPI
 	root.AddCommand(configCommand(ctx, rawArgs))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"update"}, "update", "Update the CLI to the latest release.", runUpdate, func(flags *pflag.FlagSet) {
 		flags.Bool("check", false, "Report the latest release without installing it.")
+		flags.Bool("auto", false, "Run as the detached background auto-update worker.")
+		_ = flags.MarkHidden("auto")
 	},
 		withLong(`Update this CLI in place to the newest published release.
 
@@ -84,7 +95,12 @@ release archive for this platform, after its SHA-256 is checked against the
 release checksums.
 
 --check reports the installed and latest versions and installs nothing. A local
-dev build is never overwritten.`),
+dev build is never overwritten.
+
+The CLI also runs this update by itself: a regular command start spawns it in
+the background (at most once per hour), so the next start runs the new version
+and prints a one-line notice. Set CREGHT_NO_AUTO_UPDATE=1 to disable that. The
+background run logs to update.log next to the CLI's config.json.`),
 		withExample(`  creght update
   creght update --check`)))
 	root.AddCommand(projectCommand(ctx, rawArgs))

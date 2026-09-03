@@ -36,6 +36,8 @@ creght update --check   # report versions, install nothing
 
 The install method is detected, not assumed. A binary vendored by the npm package is updated by running `npm install -g creght-cli@<version>`, so the package's own metadata stays consistent with the binary; a standalone binary is replaced directly with the release archive for the running platform, after its SHA-256 is verified against the release checksums. A local `go build` reports `dev` and is never overwritten.
 
+The CLI also keeps itself current. A regular command start spawns this update in the background — at most once per hour — so the command itself is never delayed; the next start runs the new version and prints a one-line notice. Set `CREGHT_NO_AUTO_UPDATE=1` to disable auto-update; the background run logs to `update.log` next to the CLI's `config.json`.
+
 ## Login
 
 For production:

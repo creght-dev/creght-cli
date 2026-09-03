@@ -28,10 +28,16 @@ const (
 	npmPackageName = "creght-cli"
 )
 
-// updateHTTPTimeout bounds the whole exchange with GitHub. A self-update that
-// hangs is worse than one that fails: the user is usually running it before
-// doing something else.
+// updateHTTPTimeout bounds the release-lookup call to the GitHub API. A
+// self-update that hangs is worse than one that fails: the user is usually
+// running it before doing something else.
 const updateHTTPTimeout = 60 * time.Second
+
+// downloadHTTPTimeout bounds each fetch from the release download host — the
+// archive and checksums.txt. The archive is tens of megabytes, and the host
+// itself can be slow to even respond on some networks (observed: a tiny
+// checksums.txt blowing a 60-second budget), so both get the generous bound.
+const downloadHTTPTimeout = 15 * time.Minute
 
 // releaseBaseURL and apiBaseURL are variables so tests can point them at a local
 // server instead of GitHub.
@@ -43,6 +49,7 @@ var (
 func runUpdate(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	checkOnly := fs.Bool("check", false, "report the latest release without installing it")
+	auto := fs.Bool("auto", false, "run as the detached background auto-update worker")
 	err := fs.Parse(args)
 	if err != nil {
 		return err
@@ -70,6 +77,11 @@ func runUpdate(ctx context.Context, args []string) error {
 	// A dev build is someone's local `go build`; replacing it with a release
 	// binary would silently throw away what they are working on.
 	if current == "dev" {
+		if *auto {
+			// The spawner skips dev builds already; this is a second guard so a
+			// stray worker can never overwrite one either.
+			return nil
+		}
 		return fmt.Errorf("this is a local dev build, not an installed release; build from source instead of self-updating")
 	}
 	if compareVersions(current, latest) >= 0 {
@@ -83,9 +95,22 @@ func runUpdate(ctx context.Context, args []string) error {
 	}
 
 	if root, ok := npmPackageRoot(exePath); ok {
-		return updateViaNPM(ctx, latest, root)
+		err = updateViaNPM(ctx, latest, root)
+	} else {
+		err = updateBinaryInPlace(ctx, latest, exePath)
 	}
-	return updateBinaryInPlace(ctx, latest, exePath)
+	if err != nil {
+		return err
+	}
+
+	// The worker's own output lands in update.log, so the user learns about the
+	// install from the notice the next start prints.
+	if *auto {
+		if err := recordAutoUpdate(current, latest); err != nil {
+			return fmt.Errorf("record the auto-update for the next start: %w", err)
+		}
+	}
+	return nil
 }
 
 // runningExecutable resolves the binary this process was started from, following
@@ -167,12 +192,12 @@ func updateBinaryInPlace(ctx context.Context, latest string, exePath string) err
 	base := fmt.Sprintf("%s/%s/%s/releases/download/v%s", releaseDownloadURL, releaseOwner, releaseRepo, latest)
 
 	fmt.Printf("Downloading %s\n", assetName)
-	archive, err := httpGetBytes(ctx, base+"/"+assetName)
+	archive, err := httpGetBytesTimeout(ctx, base+"/"+assetName, downloadHTTPTimeout)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", assetName, err)
 	}
 
-	sums, err := httpGetBytes(ctx, base+"/checksums.txt")
+	sums, err := httpGetBytesTimeout(ctx, base+"/checksums.txt", downloadHTTPTimeout)
 	if err != nil {
 		return fmt.Errorf("download checksums.txt: %w", err)
 	}
@@ -348,7 +373,11 @@ func latestReleaseVersion(ctx context.Context) (string, error) {
 }
 
 func httpGetBytes(ctx context.Context, url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, updateHTTPTimeout)
+	return httpGetBytesTimeout(ctx, url, updateHTTPTimeout)
+}
+
+func httpGetBytesTimeout(ctx context.Context, url string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
