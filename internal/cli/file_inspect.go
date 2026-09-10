@@ -267,6 +267,9 @@ func printPlanJSON(plan syncPlan, conflictDetails map[string]conflictJSONDetail)
 	for _, p := range plan.NoBaseRemoteDiffs {
 		out.Files = append(out.Files, diffJSONEntry{Path: p, Status: "no-base"})
 	}
+	for _, p := range plan.IgnoredRemote {
+		out.Files = append(out.Files, diffJSONEntry{Path: p, Status: "ignored-remote", Reason: "hidden by .creghtignore; still on the site, push cannot delete it, use creght rm"})
+	}
 	body, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
@@ -465,4 +468,78 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 // x/tools (gopls).
 func unifiedLineDiff(aName string, bName string, a string, b string) string {
 	return udiff.Unified(aName, bName, a, b)
+}
+
+// runRemove deletes one remote file, whether or not .creghtignore hides it.
+//
+// This is the escape hatch the ignore rules otherwise close off: push --delete
+// plans deletions from the base state, and an ignored path has no base entry,
+// so the remote copy of an ignored file was previously unreachable from the
+// CLI. It is also path-scoped, which push --delete is not — that flag deletes
+// every remote file missing locally, all or nothing.
+//
+// The local copy is left alone: this deletes on the site, not on disk. If a
+// local copy is still there and not ignored, the next push re-creates the
+// remote file, so say so instead of letting it come back unexplained.
+func runRemove(ctx context.Context, args []string) error {
+	positionals, flagArgs := splitFlagArgs(args)
+	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
+	siteID := fs.String("site_id", "", "project_id/site_id")
+	dir := fs.String("dir", ".", "local directory")
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+	if len(positionals) != 1 {
+		return fmt.Errorf("rm requires exactly one <path> argument, e.g. creght rm docs/notes.md")
+	}
+
+	resolvedDir, resolvedSiteID, err := resolveSiteWorkspace(*dir, *siteID, !flagWasSet(fs, "dir"), false)
+	if err != nil {
+		return err
+	}
+	*dir, *siteID = resolvedDir, resolvedSiteID
+
+	remotePath, err := resolveWorkspacePath(*dir, positionals[0])
+	if err != nil {
+		return err
+	}
+
+	projectID, realSiteID, err := parseSiteRef(*siteID)
+	if err != nil {
+		return err
+	}
+	client, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+	files, err := client.GetFileList(ctx, projectID, realSiteID)
+	if err != nil {
+		return err
+	}
+	if _, ok := findRemoteFile(files.List, remotePath); !ok {
+		return fmt.Errorf("remote file not found: %s", remotePath)
+	}
+
+	changes := []creght.SiteActionChange{deleteFileAction(remotePath).action}
+	if _, err := client.DoSiteAction(ctx, projectID, realSiteID, newClientID(), changes); err != nil {
+		return err
+	}
+	if err := dropStateFileEntry(*dir, remotePath); err != nil {
+		return err
+	}
+	fmt.Printf("deleted remote %s\n", remotePath)
+
+	localPath, err := remotePathToLocal(*dir, remotePath)
+	if err == nil {
+		if _, statErr := os.Stat(localPath); statErr == nil {
+			ignore, ignoreErr := loadCreghtIgnore(*dir)
+			if ignoreErr == nil && !ignore.matches(remotePath) {
+				fmt.Printf("local copy kept at %s; creght push will re-create the remote file until you delete it locally too\n", localPath)
+			} else {
+				fmt.Printf("local copy kept at %s (ignored by .creghtignore, so push leaves it alone)\n", localPath)
+			}
+		}
+	}
+	fmt.Printf("rm does not publish. Use creght publish to promote the change to the live site.\n")
+	return nil
 }

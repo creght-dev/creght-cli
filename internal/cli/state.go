@@ -44,6 +44,10 @@ type syncPlan struct {
 	SkippedDeletes    []string
 	RemoteOnlyUpdates []string
 	NoBaseRemoteDiffs []string
+	// IgnoredRemote holds remote paths hidden by .creghtignore. Not a change
+	// and never part of hasChanges: it is reported so the user learns those
+	// files are still on the site and push can no longer delete them.
+	IgnoredRemote []string
 }
 
 type planConflict struct {
@@ -247,6 +251,30 @@ func saveWorkspaceState(root string, siteID string, files map[string]snapshotEnt
 	return nil
 }
 
+// dropStateFileEntry removes one file's base entry after its remote copy is
+// deleted, so the next plan does not see a base with no local file and offer
+// to delete a file that is already gone.
+func dropStateFileEntry(root string, remotePath string) error {
+	state, hasState, err := loadWorkspaceState(root)
+	if err != nil || !hasState || state.Files == nil {
+		return err
+	}
+	if _, ok := state.Files[remotePath]; !ok {
+		return nil
+	}
+	delete(state.Files, remotePath)
+	state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
+	body, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write state: %w", err)
+	}
+	gcBaseObjects(root, state.Files)
+	return nil
+}
+
 // putStateFileEntry updates the base state for a single file (used by
 // single-file pull/push) without rewriting the whole snapshot.
 func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
@@ -363,7 +391,7 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 				actions = append(actions, createFileAction(path, localEntry.Body))
 			case localOK && remoteOK && localEntry.Hash != remoteEntry.Hash:
 				noBaseRemoteDiffs = append(noBaseRemoteDiffs, path)
-				conflicts = append(conflicts, planConflict{Kind: "file", Path: path, Reason: "no base state for remote file; pull first or use --force"})
+				conflicts = append(conflicts, planConflict{Kind: "file", Path: path, Reason: "no base state for remote file; pull first or use --force (a path just removed from .creghtignore lands here too, since ignoring it dropped its base)"})
 			}
 			continue
 		}

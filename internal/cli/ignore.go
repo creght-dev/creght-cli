@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -129,6 +130,32 @@ func (i *creghtIgnore) matches(remotePath string) bool {
 		}
 	}
 	return ignored
+}
+
+// ignoredRemotePaths lists remote paths that .creghtignore hides from sync.
+//
+// These files stay on the site. push neither uploads nor deletes them, and
+// saveWorkspaceState drops their base entries, so no later plan has a base to
+// delete from — a rule added before the remote copy was removed leaves that
+// copy live and out of the CLI's reach. Reporting the paths is the difference
+// between "stopped syncing" and "still on your site"; dropping them silently
+// is what makes the ordering a trap. creght rm deletes one regardless.
+func ignoredRemotePaths(ignore *creghtIgnore, files []creght.File) []string {
+	var out []string
+	for _, file := range files {
+		if file.IsDir {
+			continue
+		}
+		if strings.TrimPrefix(filepath.ToSlash(file.Path), "/") == creghtIgnoreFileName {
+			// Never synced by design, so its absence is not a surprise.
+			continue
+		}
+		if ignore.matches(file.Path) {
+			out = append(out, file.Path)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func filterIgnoredSnapshot(ignore *creghtIgnore, files map[string]snapshotEntry) map[string]snapshotEntry {

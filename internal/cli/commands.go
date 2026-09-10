@@ -164,7 +164,11 @@ diverged remote copies under .creght/backup/ first.
 With an optional <path> it pushes just that one file and updates only its base
 state (use --force to overwrite a remote copy that moved since the last pull).
 Paths matched by the workspace-root .creghtignore are not uploaded or deleted
-remotely; the ignore file itself is never synced.
+remotely; the ignore file itself is never synced. An ignored path also loses its
+base state, so a rule added before its remote copy was deleted leaves that copy
+live on the site and out of push's reach — push and diff now name those files,
+and creght rm deletes one. --delete is not path-scoped: it deletes every remote
+file missing locally, so preview the list with creght diff --delete first.
 
 Without --dir, push discovers .creght/state.json from the current directory or
 its parents and reuses its site_id, so creght push works anywhere inside a
@@ -193,6 +197,24 @@ run creght push.`),
 		withExample(`  creght resolve --list
   creght resolve page/Index.tsx --ours
   creght resolve page/Index.tsx --theirs`)))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"rm"}, "rm <path>", "Delete one remote site file, including one hidden by .creghtignore.", runRemove, func(flags *pflag.FlagSet) {
+		addSiteIDFlag(flags)
+		flags.String("dir", ".", "Local Creght project directory.")
+	},
+		withLong(`Delete a single file from the remote site, addressed by path.
+
+Use it where push cannot reach: push --delete plans deletions from the base
+state, and a path matched by .creghtignore has no base entry, so the remote copy
+of an ignored file is otherwise undeletable from the CLI. rm is also
+path-scoped, which --delete is not.
+
+The local file is left on disk. If a local copy remains and is not ignored, the
+next push re-creates the remote file.
+
+rm does not publish. Use creght publish to promote the change to the live site.`),
+		withExample(`  creght rm docs/notes.md
+  creght rm /docs/notes.md
+  creght rm docs/notes.md --site_id=<pid>/<sid> --dir=./mysite`)))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"cat"}, "cat <path>", "Print one site file's content to stdout (remote by default, or local).", runCat, func(flags *pflag.FlagSet) {
 		addSiteIDFlag(flags)
 		flags.String("dir", ".", "Local Creght project directory.")

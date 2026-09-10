@@ -223,3 +223,67 @@ func TestCollectLocalSnapshotActionsPreservesIgnoredRemoteFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestIgnoredRemotePathsNamesHiddenRemoteFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeIgnoreTestFile(t, dir, "docs/\noutput/*\n")
+	ignore, err := loadCreghtIgnore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	remote := []creght.File{
+		{Path: "/page/Index.tsx"},
+		{Path: "/docs/a.md"},
+		{Path: "/docs/sub/b.md"},
+		{Path: "/output/shot.png"},
+		{Path: "/.creghtignore"},
+		{Path: "/docs", IsDir: true},
+	}
+	got := ignoredRemotePaths(ignore, remote)
+	want := []string{"/docs/a.md", "/docs/sub/b.md", "/output/shot.png"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestIgnoredRemotePathsEmptyWithoutRules(t *testing.T) {
+	dir := t.TempDir()
+	ignore, err := loadCreghtIgnore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := []creght.File{{Path: "/page/Index.tsx"}}
+	if got := ignoredRemotePaths(ignore, remote); len(got) != 0 {
+		t.Fatalf("expected no ignored paths, got %v", got)
+	}
+}
+
+func TestDropStateFileEntryRemovesBaseEntry(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]snapshotEntry{
+		"/page/Index.tsx": {Path: "/page/Index.tsx", Hash: "h1", Body: "a"},
+		"/docs/a.md":      {Path: "/docs/a.md", Hash: "h2", Body: "b"},
+	}
+	if err := saveWorkspaceState(dir, "pid/sid", files); err != nil {
+		t.Fatal(err)
+	}
+	if err := dropStateFileEntry(dir, "/docs/a.md"); err != nil {
+		t.Fatal(err)
+	}
+	state, hasState, err := loadWorkspaceState(dir)
+	if err != nil || !hasState {
+		t.Fatalf("state not readable: %v", err)
+	}
+	if _, ok := state.Files["/docs/a.md"]; ok {
+		t.Fatal("base entry survived dropStateFileEntry")
+	}
+	if _, ok := state.Files["/page/Index.tsx"]; !ok {
+		t.Fatal("dropStateFileEntry removed an unrelated entry")
+	}
+}

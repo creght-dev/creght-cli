@@ -19,7 +19,11 @@ type Syncer struct {
 	siteID    string
 	dir       string
 	clientID  string
-	ignore    *creghtIgnore
+	// ignoredRemote records the remote paths refreshRemote dropped because
+	// .creghtignore matched them, so push and diff can name what is still on
+	// the site instead of hiding it.
+	ignoredRemote []string
+	ignore        *creghtIgnore
 
 	mu           sync.Mutex
 	remoteByPath map[string]creght.File
@@ -194,7 +198,9 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 		return syncPlanContext{}, err
 	}
 
-	plan := buildSyncPlan(state, hasState, localFiles, s.currentRemoteFileSnapshot(), allowDelete)
+	remoteFiles := s.currentRemoteFileSnapshot()
+	plan := buildSyncPlan(state, hasState, localFiles, remoteFiles, allowDelete)
+	plan.IgnoredRemote = s.currentIgnoredRemote()
 	return syncPlanContext{
 		plan:       plan,
 		state:      state,
@@ -235,6 +241,7 @@ func (s *Syncer) refreshRemote(ctx context.Context) error {
 		}
 		s.remoteByPath[file.Path] = file
 	}
+	s.ignoredRemote = ignoredRemotePaths(s.ignore, files.List)
 
 	return nil
 }
@@ -325,6 +332,13 @@ func (s *Syncer) currentRemoteFileSnapshot() map[string]snapshotEntry {
 		files = append(files, file)
 	}
 	return remoteFileSnapshot(files)
+}
+
+func (s *Syncer) currentIgnoredRemote() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.ignoredRemote...)
 }
 
 func (s *Syncer) saveCurrentState() error {
@@ -461,6 +475,7 @@ func printSyncPlan(plan syncPlan, dryRun bool) {
 	for _, conflict := range plan.Conflicts {
 		fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
 	}
+	printIgnoredRemote(plan.IgnoredRemote, dryRun)
 	if !plan.hasChanges() && len(plan.SkippedDeletes) == 0 && len(plan.RemoteOnlyUpdates) == 0 && len(plan.Conflicts) == 0 {
 		if dryRun {
 			fmt.Println("No local changes")
@@ -481,6 +496,36 @@ func siteActionLabel(action string) string {
 	default:
 		return action
 	}
+}
+
+// printIgnoredRemote names the remote files .creghtignore is hiding. Without
+// it the user reads "not synced" as "not on the site", and only finds out
+// otherwise by loading the page.
+//
+// detailed is set by diff, the command you run to inspect the situation: it
+// lists the paths and how to delete one. push gets a single factual line —
+// ignoring a remote path can be deliberate, and a scolding paragraph on every
+// push would train the user to skip the whole summary.
+func printIgnoredRemote(paths []string, detailed bool) {
+	if len(paths) == 0 {
+		return
+	}
+	if !detailed {
+		fmt.Printf("ignored %d remote file(s) matched by .creghtignore, still on the site (creght diff lists them)\n", len(paths))
+		return
+	}
+	const show = 5
+	listed := paths
+	suffix := ""
+	if len(listed) > show {
+		listed = listed[:show]
+		suffix = fmt.Sprintf(", and %d more", len(paths)-show)
+	}
+	fmt.Printf(
+		"ignored %d remote file(s) matched by .creghtignore, still live on the site and out of push's reach: %s%s\n",
+		len(paths), strings.Join(listed, ", "), suffix,
+	)
+	fmt.Printf("  delete one with: creght rm <path>\n")
 }
 
 func deleteFileAction(remotePath string) localFileAction {

@@ -255,6 +255,14 @@ paths from `pull`, `diff`, and `push`. Ignored remote files are left untouched,
 including when using `push --delete` or `push --force`. The `.creghtignore`
 file itself is always local and is never synced.
 
+Order matters: an ignored path also loses its base state, so a rule added
+before the remote copy was deleted leaves that copy live on the site with no
+base for `push --delete` to plan from. `push` and `diff` name the remote files
+a rule is hiding, and `creght rm <path>` deletes one of them. To clear several,
+remove the rule and run `push` to rebuild their base state (`pull` instead if
+the local and remote copies have diverged), delete the files locally, run
+`push --delete`, then add the rule back.
+
 The syntax follows common gitignore conventions: blank lines, `#` comments,
 `!` negation, root-relative patterns, directory patterns, and `*`, `?`, and
 `**` wildcards. For example:
@@ -724,6 +732,7 @@ Command meanings:
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
+- `rm`: Delete one remote site file by path, including a file hidden by `.creghtignore` that `push --delete` cannot reach. Leaves the local copy on disk.
 - `resolve`: List files with conflict markers, or resolve one by keeping the local (`--ours`) or remote (`--theirs`) side.
 - `preview`: Open the remote preview URL for a site in the browser.
 - `publish`: Snapshot the current remote site source into a new version and make it live in one step.
