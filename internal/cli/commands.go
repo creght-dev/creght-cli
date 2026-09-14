@@ -250,7 +250,8 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 		withExample(`  creght importmap
   creght importmap --ref=local
   creght importmap --site_id=<pid>/<sid>`)))
-	root.AddCommand(siteCommand(ctx, rawArgs, "preview", "Open the remote preview URL for a site in the browser.", runPreview))
+	root.AddCommand(urlCommand(ctx, rawArgs, "url", "Print a site's preview, live and editor addresses."))
+	root.AddCommand(urlCommand(ctx, rawArgs, "preview", "Print a site's addresses; alias of creght url."))
 	root.AddCommand(publishCommand(ctx, rawArgs))
 	root.AddCommand(cmsCommand(ctx, rawArgs))
 	root.AddCommand(contentCommand(ctx, rawArgs))
@@ -344,7 +345,7 @@ To snapshot the current source and publish it in one step, use creght publish.`)
 		withExample(`  creght version publish 12
   creght version publish 12 --note="Roll back nav change"
   creght version publish id:456`)))
-	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "cat <version_no> <path>", "Print a site file as it was at a version.", runVersion, addVersionSiteFlags,
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "cat <version_no> <path>", "Print a site file as it was at a version.", runVersion, addSiteTargetFlags,
 		withLong(`Print one file's content as of a version, to stdout.
 
 The live files carry no history of their own, so this is the only way to see what
@@ -536,12 +537,6 @@ func tplCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return cmd
 }
 
-func siteCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error) *cobra.Command {
-	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
-		addSiteIDFlag(flags)
-	})
-}
-
 func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error, opts ...cmdOpt) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		flags.String("site_id", "", "Site reference in <project_id>/<site_id> format. Optional inside a pulled workspace.")
@@ -559,6 +554,35 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 			flags.Bool("json", false, "Output the change plan as machine-readable JSON.")
 		}
 	}, opts...)
+}
+
+// urlCommand registers the addresses command under a name. `preview` is kept as
+// a second registration rather than a cobra alias because the legacy runners
+// re-parse the raw argv, which has to start with the name the user typed.
+func urlCommand(ctx context.Context, rawArgs []string, name string, short string) *cobra.Command {
+	return legacyCommand(ctx, rawArgs, []string{name}, name, short, runURL, func(flags *pflag.FlagSet) {
+		addSiteTargetFlags(flags)
+		flags.Bool("open", false, "Also open the preview URL in the browser.")
+		flags.Bool("json", false, "Print the addresses as JSON.")
+	},
+		withLong(`Print every address a site answers on:
+
+  Preview  the preview host, which always serves the current remote workspace,
+           so a push is visible there immediately
+  Live     each published domain and the version it serves; a pinned domain
+           stays on its own version instead of following the site default
+  Editor   the site in the Creght web editor
+
+Nothing is opened unless --open is passed, so the command is safe over SSH, in
+CI, and under an agent. --json prints {"preview","live":[...],"editor"} for
+scripting.
+
+Inside a pulled workspace --site_id is optional; it is read from
+.creght/state.json like pull/push do.`),
+		withExample(`  creght url
+  creght url --open
+  creght url --json
+  creght url --site_id=<pid>/<sid>`))
 }
 
 func publishCommand(ctx context.Context, rawArgs []string) *cobra.Command {
@@ -724,22 +748,22 @@ func addSiteIDFlag(flags *pflag.FlagSet) {
 	flags.String("site_id", "", "Site reference in <project_id>/<site_id> format.")
 }
 
-// addVersionSiteFlags mirrors pull/push so site-version commands can be run from
-// inside a pulled workspace without repeating --site_id.
-func addVersionSiteFlags(flags *pflag.FlagSet) {
+// addSiteTargetFlags mirrors pull/push so a command can be run from inside a
+// pulled workspace without repeating --site_id.
+func addSiteTargetFlags(flags *pflag.FlagSet) {
 	flags.String("site_id", "", "Site reference in <project_id>/<site_id> format. Optional inside a pulled workspace.")
 	flags.String("dir", ".", "Local Creght project directory.")
 }
 
 func addVersionCreateFlags(flags *pflag.FlagSet) {
-	addVersionSiteFlags(flags)
+	addSiteTargetFlags(flags)
 	flags.String("note", "", "Note describing what this version contains.")
 	flags.Bool("allow-dirty", false, "Snapshot the remote site even when local changes are unpushed.")
 	flags.Bool("json", false, "Print the created version as JSON.")
 }
 
 func addVersionListFlags(flags *pflag.FlagSet) {
-	addVersionSiteFlags(flags)
+	addSiteTargetFlags(flags)
 	flags.Int("limit", 0, "Max versions to print. 0 prints every version returned.")
 	flags.Bool("json", false, "Print the raw publish state as JSON.")
 }
@@ -748,18 +772,18 @@ func addVersionListFlags(flags *pflag.FlagSet) {
 // treats a bare --version anywhere in the args as "print the CLI version", which
 // would swallow it. The version to publish is a positional argument instead.
 func addVersionPublishFlags(flags *pflag.FlagSet) {
-	addVersionSiteFlags(flags)
+	addSiteTargetFlags(flags)
 	flags.String("note", "", "Optional publish note.")
 	flags.Bool("json", false, "Print the publish result as JSON.")
 }
 
 func addVersionDiffFlags(flags *pflag.FlagSet) {
-	addVersionSiteFlags(flags)
+	addSiteTargetFlags(flags)
 	flags.Bool("name_only", false, "List changed paths without the trailing summary.")
 }
 
 func addVersionRollbackFlags(flags *pflag.FlagSet) {
-	addVersionSiteFlags(flags)
+	addSiteTargetFlags(flags)
 	flags.Bool("dry_run", false, "Show what would change and stop.")
 	flags.Bool("yes", false, "Skip the confirmation prompt.")
 }

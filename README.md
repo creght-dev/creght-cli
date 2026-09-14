@@ -2,7 +2,7 @@
 
 Creght CLI is a thin local bridge for syncing site code between a local directory and Creght.
 
-Creght remains responsible for cloud rendering, CMS, assets, and the preview environment. The CLI does not render sites locally; use `creght preview` to open the canonical remote preview.
+Creght remains responsible for cloud rendering, CMS, assets, and the preview environment. The CLI does not render sites locally; use `creght url` to print the canonical remote preview address.
 
 ## Install
 
@@ -338,18 +338,44 @@ content is backed up under `.creght/backup/<timestamp>-*/`.
 `base_to_local_diff` / `base_to_remote_diff`, so agents can decide how to
 resolve without extra round-trips.
 
-## Open Preview
+## Site Addresses
 
-Open the remote preview URL for a site in the browser:
+Print every address a site answers on:
 
 ```bash
-creght preview --site_id=<project_id>/<site_id>
+creght url
 ```
+
+```text
+Preview:  https://<site_id>.preview.creght.cn/
+Live:     https://demo.creght.cn/   v11
+          https://www.example.com/  v12 (pinned)
+Editor:   https://creght.cn/teditor/project/<project_id>/site/<site_id>
+```
+
+- **Preview** always serves the current remote workspace, so a `push` shows up
+  there immediately.
+- **Live** lists each published domain and the version it serves. A pinned
+  domain stays on its own version instead of following the site default.
+- **Editor** opens the site in the Creght web editor.
+
+Nothing is opened unless you ask, so the command also works over SSH, in CI,
+and under an agent:
+
+```bash
+creght url --open                       # print, then open the preview
+creght url --json                       # {"preview":...,"live":[...],"editor":...}
+creght url --site_id=<project_id>/<site_id>
+```
+
+`creght preview` is an alias of `creght url` and takes the same flags. Inside a
+pulled workspace `--site_id` is optional; it is read from `.creght/state.json`
+like `pull`/`push` do.
 
 For local development:
 
 ```bash
-CREGHT_API_HOST=http://localhost:8433 creght preview --site_id=<project_id>/<site_id>
+CREGHT_API_HOST=http://localhost:8433 creght url --site_id=<project_id>/<site_id>
 ```
 
 ## Publish Site
@@ -376,7 +402,8 @@ CREGHT_API_HOST=http://localhost:8433 creght publish --site_id=<project_id>/<sit
 
 ```text
 Published <project_id>/<site_id>
-version 14 (id 458) is live on demo.creght.cn
+version 14 (id 458) is live on:
+  https://demo.creght.cn/
 ```
 
 ## Site Versions
@@ -688,8 +715,8 @@ source of truth.
 
 Creght CLI is a local bridge for Creght site code. It can authenticate with
 Creght, list projects and sites, pull remote site files into a local directory
-with three-way merge, push local files back to Creght, resolve conflicts, open
-the remote preview, and publish a site.
+with three-way merge, push local files back to Creght, resolve conflicts, print
+a site's preview and live addresses, and publish a site.
 
 It can also manage site versions: immutable snapshots of a site's source files,
 created and published like git commits.
@@ -706,7 +733,7 @@ creght project list
 creght pull --site_id=<project_id>/<site_id> --dir=./mysite
 creght push --site_id=<project_id>/<site_id> --dir=./mysite
 creght resolve --list
-creght preview --site_id=<project_id>/<site_id>
+creght url [--open] [--json] [--site_id=<project_id>/<site_id>]
 creght publish --site_id=<project_id>/<site_id> [--note=<note>]
 creght cms collections --site_id=<project_id>/<site_id>
 creght cms collection create --site_id=<project_id>/<site_id> --key=<key> --name=<name> --schema=./schema.json
@@ -734,7 +761,7 @@ Command meanings:
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.
 - `rm`: Delete one remote site file by path, including a file hidden by `.creghtignore` that `push --delete` cannot reach. Leaves the local copy on disk.
 - `resolve`: List files with conflict markers, or resolve one by keeping the local (`--ours`) or remote (`--theirs`) side.
-- `preview`: Open the remote preview URL for a site in the browser.
+- `url`: Print a site's preview, live and editor addresses; `--open` also opens the preview, `--json` prints them for scripting. `preview` is an alias.
 - `publish`: Snapshot the current remote site source into a new version and make it live in one step.
 - `cms`: Manage CMS collections.
 - `content`: Manage CMS content entries.

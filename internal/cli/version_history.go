@@ -75,7 +75,7 @@ func sortedPaths(sets ...map[string]creght.File) []string {
 func runVersionCat(ctx context.Context, args []string) error {
 	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("version cat", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func runVersionCat(ctx context.Context, args []string) error {
 	}
 	version, target := positionals[0], normalizeSitePath(positionals[1])
 
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
+	projectID, realSiteID, _, err := resolveSiteTarget(fs, *siteID, *dir, true)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func runVersionCat(ctx context.Context, args []string) error {
 func runVersionDiff(ctx context.Context, args []string) error {
 	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("version diff", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	nameOnly := fs.Bool("name_only", false, "list changed paths without bodies")
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
@@ -124,7 +124,7 @@ func runVersionDiff(ctx context.Context, args []string) error {
 		to = positionals[1]
 	}
 
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
+	projectID, realSiteID, _, err := resolveSiteTarget(fs, *siteID, *dir, true)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func runVersionDiff(ctx context.Context, args []string) error {
 func runVersionRollback(ctx context.Context, args []string) error {
 	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("version rollback", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	yes := fs.Bool("yes", false, "skip the confirmation prompt")
 	dryRun := fs.Bool("dry_run", false, "show what would change and stop")
 	if err := fs.Parse(flagArgs); err != nil {
@@ -195,7 +195,7 @@ func runVersionRollback(ctx context.Context, args []string) error {
 	}
 	version := positionals[0]
 
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, true)
+	projectID, realSiteID, _, err := resolveSiteTarget(fs, *siteID, *dir, true)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -672,6 +673,11 @@ func runPush(ctx context.Context, args []string) error {
 	}
 
 	fmt.Printf("Pushed %s -> %s/%s\n", syncer.dir, projectID, realSiteID)
+	// The push is already done, so a preview host that cannot be resolved is a
+	// missing line, not a failed command.
+	if preview, err := previewURL(ctx, client, realSiteID); err == nil && preview != "" {
+		fmt.Printf("Preview: %s\n", preview)
+	}
 	return nil
 }
 
@@ -733,36 +739,6 @@ func runDiff(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runPreview(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
-	siteID := fs.String("site_id", "", "project_id/site_id")
-	err := fs.Parse(args)
-	if err != nil {
-		return err
-	}
-
-	_, realSiteID, err := parseSiteRef(*siteID)
-	if err != nil {
-		return err
-	}
-
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
-	}
-
-	url, err := previewURL(ctx, client, realSiteID)
-	if err != nil {
-		return err
-	}
-	if url == "" {
-		return fmt.Errorf("preview URL is unavailable")
-	}
-
-	fmt.Printf("Opening preview: %s\n", url)
-	return openBrowser(url)
-}
-
 func runPublish(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	siteID := fs.String("site_id", "", "project_id/site_id")
@@ -791,15 +767,41 @@ func runPublish(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Published %s/%s\n", projectID, realSiteID)
-	if result.VersionID != 0 {
-		if len(result.Targets) > 0 {
-			fmt.Printf("%s is live on %s\n", versionLabel(result.VersionNo, result.VersionID), strings.Join(result.Targets, ", "))
-		} else {
-			fmt.Printf("%s is live\n", versionLabel(result.VersionNo, result.VersionID))
+	printPublishResult(os.Stdout, projectID, realSiteID, result, liveURLScheme(ctx, client))
+	return nil
+}
+
+// printPublishResult reports what went live and where, naming the published
+// domains as URLs so they can be opened straight from the terminal.
+func printPublishResult(out io.Writer, projectID string, realSiteID string, result creght.PublishVersionResult, scheme string) {
+	fmt.Fprintf(out, "Published %s/%s\n", projectID, realSiteID)
+	if result.VersionID == 0 {
+		return
+	}
+	if len(result.Targets) == 0 {
+		fmt.Fprintf(out, "%s is live\n", versionLabel(result.VersionNo, result.VersionID))
+		return
+	}
+
+	fmt.Fprintf(out, "%s is live on:\n", versionLabel(result.VersionNo, result.VersionID))
+	for _, target := range result.Targets {
+		if address := domainURL(scheme, target); address != "" {
+			fmt.Fprintf(out, "  %s\n", address)
 		}
 	}
-	return nil
+}
+
+// liveURLScheme reports the scheme published domains are served over. The
+// publish panel returns bare hostnames, and this only decorates them, so a
+// deployment that cannot be reached falls back to https rather than failing a
+// publish that already succeeded.
+func liveURLScheme(ctx context.Context, client *creght.Client) string {
+	info, err := client.GetSystemInfo(ctx)
+	if err != nil {
+		return "https"
+	}
+
+	return schemeOf(info.SelfAPIHost)
 }
 
 func releaseTag(rawVersion string) (string, error) {
@@ -913,23 +915,32 @@ func previewURL(ctx context.Context, client *creght.Client, siteID string) (stri
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(info.SelfAPIHost) == "" {
-		return "", nil
+
+	return previewURLForHost(info.SelfAPIHost, siteID), nil
+}
+
+// previewURLForHost derives a site's preview address from the deployment's own
+// API host: the preview environment is a subdomain of it.
+func previewURLForHost(apiHost string, siteID string) string {
+	if strings.TrimSpace(apiHost) == "" {
+		return ""
 	}
 
-	u, err := url.Parse(info.SelfAPIHost)
-	if err != nil {
-		return "", err
+	u, err := url.Parse(apiHost)
+	if err != nil || u.Host == "" {
+		return ""
 	}
 	u.Host = siteID + ".preview." + u.Host
 	u.Path = "/"
 	u.RawQuery = ""
 	u.Fragment = ""
 
-	return u.String(), nil
+	return u.String()
 }
 
-func openBrowser(rawURL string) error {
+// openBrowser is a variable so tests can observe what --open would launch
+// without a browser window appearing.
+var openBrowser = func(rawURL string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

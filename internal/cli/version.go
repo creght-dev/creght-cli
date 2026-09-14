@@ -67,19 +67,19 @@ Notes:
   creght version list. Pass id:<version_id> to select by id instead.`)
 }
 
-// versionSiteFlags registers the site/workspace flags every version subcommand
-// accepts, mirroring pull/push so --site_id stays optional inside a workspace.
-func versionSiteFlags(fs *flag.FlagSet) (siteID *string, dir *string) {
+// siteTargetFlags registers the site/workspace flags a command accepts,
+// mirroring pull/push so --site_id stays optional inside a workspace.
+func siteTargetFlags(fs *flag.FlagSet) (siteID *string, dir *string) {
 	siteID = fs.String("site_id", "", "project_id/site_id")
 	dir = fs.String("dir", ".", "local directory")
 	return siteID, dir
 }
 
-// resolveVersionSite resolves the target site the same way pull/push do: prefer
+// resolveSiteTarget resolves the target site the same way pull/push do: prefer
 // an explicit --site_id, otherwise discover .creght/state.json from --dir or its
-// parents. The workspace is optional, so version commands still work from
+// parents. The workspace is optional, so these commands still work from
 // anywhere with an explicit --site_id.
-func resolveVersionSite(fs *flag.FlagSet, siteID string, dir string, quiet bool) (projectID string, realSiteID string, root string, err error) {
+func resolveSiteTarget(fs *flag.FlagSet, siteID string, dir string, quiet bool) (projectID string, realSiteID string, root string, err error) {
 	root, resolvedSiteID, err := resolveSiteWorkspace(dir, siteID, !flagWasSet(fs, "dir"), false)
 	if err != nil {
 		return "", "", "", err
@@ -97,7 +97,7 @@ func resolveVersionSite(fs *flag.FlagSet, siteID string, dir string, quiet bool)
 
 func runVersionCreate(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("version create", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	note := fs.String("note", "", "version note")
 	allowDirty := fs.Bool("allow-dirty", false, "snapshot the remote workspace even when local changes are unpushed")
 	jsonOut := fs.Bool("json", false, "output the created version as JSON")
@@ -108,7 +108,7 @@ func runVersionCreate(ctx context.Context, args []string) error {
 		return fmt.Errorf("version create does not accept positional arguments; use --note=<note>")
 	}
 
-	projectID, realSiteID, root, err := resolveVersionSite(fs, *siteID, *dir, *jsonOut)
+	projectID, realSiteID, root, err := resolveSiteTarget(fs, *siteID, *dir, *jsonOut)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func runVersionCreate(ctx context.Context, args []string) error {
 
 func runVersionList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("version list", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	limit := fs.Int("limit", 0, "max versions to print (0 prints all returned)")
 	jsonOut := fs.Bool("json", false, "output the publish state as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -152,7 +152,7 @@ func runVersionList(ctx context.Context, args []string) error {
 		return fmt.Errorf("version list does not accept positional arguments")
 	}
 
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, *jsonOut)
+	projectID, realSiteID, _, err := resolveSiteTarget(fs, *siteID, *dir, *jsonOut)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func printVersionList(out io.Writer, state creght.SitePublishState, limit int) {
 func runVersionPublish(ctx context.Context, args []string) error {
 	positionals, flagArgs := splitFlagArgs(args)
 	fs := flag.NewFlagSet("version publish", flag.ContinueOnError)
-	siteID, dir := versionSiteFlags(fs)
+	siteID, dir := siteTargetFlags(fs)
 	note := fs.String("note", "", "publish note")
 	jsonOut := fs.Bool("json", false, "output the publish result as JSON")
 	if err := fs.Parse(flagArgs); err != nil {
@@ -254,7 +254,7 @@ func runVersionPublish(ctx context.Context, args []string) error {
 		return fmt.Errorf("version publish requires a version; pass <version_no> (see creght version list) or id:<version_id>")
 	}
 
-	projectID, realSiteID, _, err := resolveVersionSite(fs, *siteID, *dir, *jsonOut)
+	projectID, realSiteID, _, err := resolveSiteTarget(fs, *siteID, *dir, *jsonOut)
 	if err != nil {
 		return err
 	}
