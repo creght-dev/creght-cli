@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -58,6 +59,16 @@ func runUpdate(ctx context.Context, args []string) error {
 		return fmt.Errorf("update does not accept positional arguments")
 	}
 
+	if *auto {
+		release, ok := acquireAutoUpdateLock()
+		if !ok {
+			// Another worker is already installing. Leaving it to finish alone
+			// is the whole point of the lock.
+			return nil
+		}
+		defer release()
+	}
+
 	current := strings.TrimSpace(version)
 	latest, err := latestReleaseVersion(ctx)
 	if err != nil {
@@ -94,8 +105,16 @@ func runUpdate(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// The background worker never shells out to npm: a global reinstall takes
+	// the whole command offline for as long as it runs, and a detached worker
+	// killed mid-install leaves it that way, with no working `creght` left to
+	// repair it. It swaps the vendored binary instead, which is one rename.
 	if root, ok := npmPackageRoot(exePath); ok {
-		err = updateViaNPM(ctx, latest, root)
+		if *auto {
+			err = updateNPMVendoredBinary(ctx, latest, exePath, root)
+		} else {
+			err = updateViaNPM(ctx, latest, root)
+		}
 	} else {
 		err = updateBinaryInPlace(ctx, latest, exePath)
 	}
@@ -116,7 +135,10 @@ func runUpdate(ctx context.Context, args []string) error {
 // runningExecutable resolves the binary this process was started from, following
 // symlinks so a Homebrew-style symlinked path is replaced at its real location
 // rather than turned into a regular file.
-func runningExecutable() (string, error) {
+//
+// It is a variable so tests can point it at a temp file rather than have them
+// swap the test binary out from under themselves.
+var runningExecutable = func() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locate the running binary: %w", err)
@@ -181,6 +203,102 @@ func updateViaNPM(ctx context.Context, latest string, root string) error {
 	return nil
 }
 
+// updateNPMVendoredBinary updates an npm install without running npm, by
+// swapping the binary the package vendors and then recording the new version in
+// the package's own package.json.
+//
+// This is the background worker's path. `npm install -g` retires the whole
+// package directory and rebuilds the bin symlink, so `creght` is missing for as
+// long as the install runs — tens of seconds for a package that vendors every
+// platform's binary — and a worker killed in that window leaves the command
+// missing for good, with nothing left to run to fix it. Swapping the binary is
+// a single rename: the wrapper and the symlink are never touched, and there is
+// no instant at which the vendored binary does not exist.
+//
+// The cost is that the rest of the package — bin/creght.js above all — stays at
+// the version npm installed. It is a thin, stable launcher, and a manual
+// `creght update` still goes through npm; a release that changes the wrapper
+// needs one.
+func updateNPMVendoredBinary(ctx context.Context, latest string, exePath string, root string) error {
+	fmt.Printf("Updating the npm install at %s in place\n", root)
+	if err := updateBinaryInPlace(ctx, latest, exePath); err != nil {
+		return err
+	}
+
+	// Without this the package would keep claiming the version npm installed,
+	// so the next `npm update` would reinstall over the new binary.
+	if err := setNPMPackageVersion(root, latest); err != nil {
+		// The binary is already the new one and verified; a stale version field
+		// costs at most one redundant reinstall later, so it must not turn a
+		// finished update into a failure.
+		fmt.Printf("Note: could not record %s in the package.json at %s: %v\n", latest, root, err)
+	}
+	return nil
+}
+
+// setNPMPackageVersion rewrites the version field of the npm package's
+// package.json in place, leaving every other byte of the file alone.
+func setNPMPackageVersion(root string, latest string) error {
+	path := filepath.Join(root, "package.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	loc := npmVersionFieldPattern.FindSubmatchIndex(body)
+	if loc == nil {
+		return fmt.Errorf("%s has no version field", path)
+	}
+	updated := make([]byte, 0, len(body)+len(latest))
+	updated = append(updated, body[:loc[2]]...)
+	updated = append(updated, latest...)
+	updated = append(updated, body[loc[3]:]...)
+
+	// The rewrite is textual, so prove it produced the intended package before
+	// it lands: a mangled package.json would break npm for this package.
+	var pkg struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(updated, &pkg); err != nil {
+		return fmt.Errorf("rewriting the version field produced invalid JSON: %w", err)
+	}
+	if pkg.Name != npmPackageName || pkg.Version != latest {
+		return fmt.Errorf("rewriting the version field produced %s@%s, want %s@%s", pkg.Name, pkg.Version, npmPackageName, latest)
+	}
+
+	return writeFileAtomic(path, updated, 0o644)
+}
+
+// npmVersionFieldPattern captures the value of the first "version" key, which in
+// a package.json is the package's own.
+var npmVersionFieldPattern = regexp.MustCompile(`"version"\s*:\s*"([^"]*)"`)
+
+// writeFileAtomic writes body to path through a temp file in the same directory,
+// so a reader never sees a half-written file and a failure leaves the original.
+func writeFileAtomic(path string, body []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpPath, path)
+}
+
 // updateBinaryInPlace downloads the release archive for this platform, checks it
 // against the release checksums, and swaps the binary.
 //
@@ -209,12 +327,74 @@ func updateBinaryInPlace(ctx context.Context, latest string, exePath string) err
 	if err != nil {
 		return err
 	}
+
+	// Kept so a binary that turns out not to run can be put back. The checksum
+	// proves the download arrived intact, not that it works here — a release
+	// built for the wrong platform, or a kernel that refuses the image, would
+	// otherwise leave the user with a command they cannot run and cannot update.
+	previous, err := os.ReadFile(exePath)
+	if err != nil {
+		return fmt.Errorf("read the current binary at %s: %w", exePath, err)
+	}
+
 	if err := replaceExecutable(exePath, binary); err != nil {
 		return err
+	}
+	if err := verifyInstalledBinary(exePath, latest); err != nil {
+		if rollbackErr := rollbackExecutable(exePath, previous); rollbackErr != nil {
+			return fmt.Errorf("%w; restoring the previous binary also failed: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("%w; the previous binary was restored", err)
 	}
 
 	fmt.Printf("Updated %s to %s.\n", exePath, latest)
 	return nil
+}
+
+// verifyBinaryTimeout bounds the smoke test. The new binary only has to print
+// its version; anything slower than this is a binary that does not work here.
+const verifyBinaryTimeout = 30 * time.Second
+
+// verifyInstalledBinary runs the freshly installed binary and checks that it
+// reports the version it is supposed to be, so the caller can roll back before
+// the user is left with a broken command.
+func verifyInstalledBinary(path string, want string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), verifyBinaryTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, path, "--version")
+	// The smoke test must not start an auto-update of its own.
+	cmd.Env = append(os.Environ(), autoUpdateEnvOptOut+"=1")
+	// Captured rather than inherited: the worker's own stderr is update.log, and
+	// what a binary says on its way out is the one clue to why a release is bad.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if detail := firstLine(stderr.String()); detail != "" {
+			return fmt.Errorf("the newly installed binary does not run: %w: %s", err, detail)
+		}
+		return fmt.Errorf("the newly installed binary does not run: %w", err)
+	}
+
+	got := strings.TrimSpace(string(out))
+	if compareVersions(got, want) != 0 {
+		return fmt.Errorf("the newly installed binary reports version %q, want %q", got, want)
+	}
+
+	return nil
+}
+
+// firstLine trims body to its first non-empty line, so a binary that fails
+// noisily still yields a one-line reason.
+func firstLine(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+
+	return ""
 }
 
 func releaseAssetName(version string, goos string, goarch string) string {
@@ -337,17 +517,63 @@ func replaceExecutable(path string, body []byte) error {
 	}
 
 	if runtime.GOOS == "windows" {
-		old := path + ".old"
+		old := replacedExecutablePath(path)
 		_ = os.Remove(old)
 		if err := os.Rename(path, old); err != nil {
 			return fmt.Errorf("move the running binary aside: %w", err)
 		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			// Put the old binary back. Returning here with the path empty would
+			// turn a failed update into a missing command, and the command that
+			// repairs it is the one that just went missing.
+			_ = os.Rename(old, path)
+			return fmt.Errorf("replace %s: %w", path, err)
+		}
+		return nil
 	}
+
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 
 	return nil
+}
+
+// replacedExecutablePath names where the Windows swap parks the running image.
+func replacedExecutablePath(path string) string {
+	return path + ".old"
+}
+
+// rollbackExecutable puts back the binary that was at path before the swap.
+func rollbackExecutable(path string, previous []byte) error {
+	// On Windows, moving the parked copy back is the restore that works even
+	// when the previous binary is the image this process is running from —
+	// which it is, for the update worker. Writing a fresh file there instead
+	// would have to move the running image aside a second time, and Windows
+	// will not let the same name be reused while it is still executing.
+	if runtime.GOOS == "windows" {
+		if err := restorePreviousExecutable(path); err == nil {
+			return nil
+		}
+	}
+
+	return replaceExecutable(path, previous)
+}
+
+// restorePreviousExecutable moves the copy the Windows swap parked aside back
+// over the binary that replaced it.
+func restorePreviousExecutable(path string) error {
+	old := replacedExecutablePath(path)
+	if _, err := os.Stat(old); err != nil {
+		return err
+	}
+	// The binary being discarded is the one that just failed its smoke test, so
+	// nothing is running it and it can go.
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	return os.Rename(old, path)
 }
 
 // latestReleaseVersion asks GitHub for the newest release tag, without the "v".

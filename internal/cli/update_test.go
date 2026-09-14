@@ -309,3 +309,299 @@ func TestUpdateRejectsPositionalArguments(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// releaseDownloadServer serves one release asset and its checksums.txt, the way
+// the GitHub download host does.
+func releaseDownloadServer(t *testing.T, releaseVersion string, binary string) *httptest.Server {
+	t.Helper()
+
+	assetName := releaseAssetName(releaseVersion, runtime.GOOS, runtime.GOARCH)
+	archive := testTarGz(t, map[string]string{"creght": binary})
+	sum := sha256.Sum256(archive)
+	sums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), assetName)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, assetName):
+			_, _ = w.Write(archive)
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			_, _ = w.Write([]byte(sums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+func swapReleaseDownloadURL(url string) func() {
+	original := releaseDownloadURL
+	releaseDownloadURL = url
+	return func() { releaseDownloadURL = original }
+}
+
+func swapRunningExecutable(t *testing.T, path string) {
+	t.Helper()
+
+	original := runningExecutable
+	runningExecutable = func() (string, error) { return path, nil }
+	t.Cleanup(func() { runningExecutable = original })
+}
+
+// shellBinary is a stand-in for the real binary in the tests that have to run
+// what was installed.
+func shellBinary(body string) string {
+	return "#!/bin/sh\n" + body + "\n"
+}
+
+// An installed binary that does not run, or is not the version it claimed to
+// be, must not be the state the user is left in: the command that repairs a
+// broken install is the command that just broke.
+func TestUpdateBinaryInPlaceRestoresThePreviousBinaryWhenTheNewOneFailsToRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the smoke test stands a shell script in for the binary")
+	}
+
+	cases := []struct {
+		name      string
+		installed string
+	}{
+		{name: "does not run", installed: shellBinary("exit 1")},
+		{name: "is the wrong version", installed: shellBinary("echo 0.11.0")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := releaseDownloadServer(t, "0.13.0", tc.installed)
+			t.Cleanup(swapReleaseDownloadURL(server.URL))
+
+			dir := t.TempDir()
+			exePath := filepath.Join(dir, "creght")
+			previous := shellBinary("echo 0.12.1")
+			if err := os.WriteFile(exePath, []byte(previous), 0o755); err != nil {
+				t.Fatalf("seed binary: %v", err)
+			}
+
+			var err error
+			_ = captureStdout(t, func() {
+				err = updateBinaryInPlace(context.Background(), "0.13.0", exePath)
+			})
+
+			if err == nil || !strings.Contains(err.Error(), "previous binary was restored") {
+				t.Fatalf("err = %v, want a rollback", err)
+			}
+			body, readErr := os.ReadFile(exePath)
+			if readErr != nil {
+				t.Fatalf("read binary: %v", readErr)
+			}
+			if string(body) != previous {
+				t.Fatalf("body = %q, want the previous binary back", body)
+			}
+			info, statErr := os.Stat(exePath)
+			if statErr != nil {
+				t.Fatalf("stat: %v", statErr)
+			}
+			if info.Mode().Perm()&0o111 == 0 {
+				t.Fatalf("mode = %v, want the restored binary to stay executable", info.Mode())
+			}
+		})
+	}
+}
+
+func TestUpdateBinaryInPlaceKeepsABinaryThatRunsAndReportsTheNewVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the smoke test stands a shell script in for the binary")
+	}
+	server := releaseDownloadServer(t, "0.13.0", shellBinary("echo 0.13.0"))
+	t.Cleanup(swapReleaseDownloadURL(server.URL))
+
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "creght")
+	if err := os.WriteFile(exePath, []byte(shellBinary("echo 0.12.1")), 0o755); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+
+	var err error
+	_ = captureStdout(t, func() {
+		err = updateBinaryInPlace(context.Background(), "0.13.0", exePath)
+	})
+	if err != nil {
+		t.Fatalf("updateBinaryInPlace: %v", err)
+	}
+
+	body, readErr := os.ReadFile(exePath)
+	if readErr != nil {
+		t.Fatalf("read binary: %v", readErr)
+	}
+	if string(body) != shellBinary("echo 0.13.0") {
+		t.Fatalf("body = %q, want the new binary", body)
+	}
+	// Neither the temp file nor a rollback copy may be left beside it.
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("read dir: %v", readErr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("dir has %d entries, want only the binary", len(entries))
+	}
+}
+
+// writeInstalledNPMPackage builds an npm install the way npm leaves it: the
+// package.json npm shipped, plus the vendored binary for this platform.
+func writeInstalledNPMPackage(t *testing.T, installedVersion string, binary string) (root string, exePath string) {
+	t.Helper()
+
+	root = t.TempDir()
+	binDir := filepath.Join(root, "vendor", "darwin-arm64")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("create vendor dir: %v", err)
+	}
+	exePath = filepath.Join(binDir, "creght")
+	if err := os.WriteFile(exePath, []byte(binary), 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+
+	pkg := fmt.Sprintf("{\n  \"name\": %q,\n  \"version\": %q,\n  \"bin\": {\n    \"creght\": \"bin/creght.js\"\n  }\n}\n", npmPackageName, installedVersion)
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(pkg), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	return root, exePath
+}
+
+// fakeNPMOnPath puts an npm on PATH that records having been run, so a test can
+// assert whether the update shelled out to it.
+func fakeNPMOnPath(t *testing.T) (marker string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	marker = filepath.Join(dir, "npm-was-run")
+	script := shellBinary(fmt.Sprintf("echo ran > %q", marker))
+	if err := os.WriteFile(filepath.Join(dir, "npm"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake npm: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	return marker
+}
+
+func npmWasRun(t *testing.T, marker string) bool {
+	t.Helper()
+
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
+// The background worker must not run `npm install -g`: it takes the command
+// offline for as long as the reinstall runs, and a worker killed in that window
+// leaves it offline for good.
+func TestUpdateAutoSwapsTheVendoredBinaryWithoutRunningNPM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the smoke test stands a shell script in for the binary")
+	}
+	swapUpdateStateDir(t)
+	t.Cleanup(swapVersion("0.12.1"))
+	api := releaseAPIServer(t, "v0.13.0")
+	t.Cleanup(swapReleaseAPIBaseURL(api.URL))
+	download := releaseDownloadServer(t, "0.13.0", shellBinary("echo 0.13.0"))
+	t.Cleanup(swapReleaseDownloadURL(download.URL))
+	marker := fakeNPMOnPath(t)
+
+	root, exePath := writeInstalledNPMPackage(t, "0.12.1", shellBinary("echo 0.12.1"))
+	swapRunningExecutable(t, exePath)
+
+	var err error
+	_ = captureStdout(t, func() { err = runUpdate(context.Background(), []string{"--auto"}) })
+	if err != nil {
+		t.Fatalf("runUpdate --auto: %v", err)
+	}
+
+	if npmWasRun(t, marker) {
+		t.Fatalf("the background worker ran npm")
+	}
+	body, readErr := os.ReadFile(exePath)
+	if readErr != nil {
+		t.Fatalf("read binary: %v", readErr)
+	}
+	if string(body) != shellBinary("echo 0.13.0") {
+		t.Fatalf("body = %q, want the new binary", body)
+	}
+
+	// The package must not keep claiming the version npm installed, or the next
+	// `npm update` would reinstall over the new binary.
+	pkg, readErr := os.ReadFile(filepath.Join(root, "package.json"))
+	if readErr != nil {
+		t.Fatalf("read package.json: %v", readErr)
+	}
+	if !strings.Contains(string(pkg), `"version": "0.13.0"`) {
+		t.Fatalf("package.json = %q, want version 0.13.0", pkg)
+	}
+
+	state, stateErr := loadUpdateState()
+	if stateErr != nil {
+		t.Fatalf("loadUpdateState: %v", stateErr)
+	}
+	if state.UpdatedFrom != "0.12.1" || state.UpdatedTo != "0.13.0" {
+		t.Fatalf("state = %+v, want the notice for the next start", state)
+	}
+}
+
+// A manual update is interactive and can be retried, so it keeps going through
+// npm and leaves the whole package — the bin/creght.js wrapper included — at the
+// version it says it is.
+func TestManualUpdateStillGoesThroughNPM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake npm on PATH is a shell script")
+	}
+	swapUpdateStateDir(t)
+	t.Cleanup(swapVersion("0.12.1"))
+	api := releaseAPIServer(t, "v0.13.0")
+	t.Cleanup(swapReleaseAPIBaseURL(api.URL))
+	marker := fakeNPMOnPath(t)
+
+	_, exePath := writeInstalledNPMPackage(t, "0.12.1", shellBinary("echo 0.12.1"))
+	swapRunningExecutable(t, exePath)
+
+	var err error
+	_ = captureStdout(t, func() { err = runUpdate(context.Background(), nil) })
+	if err != nil {
+		t.Fatalf("runUpdate: %v", err)
+	}
+	if !npmWasRun(t, marker) {
+		t.Fatalf("a manual update must hand the install to npm")
+	}
+}
+
+func TestSetNPMPackageVersionRewritesOnlyTheVersionField(t *testing.T) {
+	root, _ := writeInstalledNPMPackage(t, "0.12.1", "binary")
+	path := filepath.Join(root, "package.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read package.json: %v", err)
+	}
+
+	if err := setNPMPackageVersion(root, "0.13.0"); err != nil {
+		t.Fatalf("setNPMPackageVersion: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read package.json: %v", err)
+	}
+	want := strings.Replace(string(before), `"version": "0.12.1"`, `"version": "0.13.0"`, 1)
+	if string(after) != want {
+		t.Fatalf("package.json =\n%s\nwant\n%s", after, want)
+	}
+}
+
+func TestSetNPMPackageVersionRejectsAPackageItDoesNotRecognize(t *testing.T) {
+	root := t.TempDir()
+	pkg := `{"name":"something-else","version":"0.12.1"}`
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(pkg), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+
+	if err := setNPMPackageVersion(root, "0.13.0"); err == nil {
+		t.Fatalf("err = nil, want a refusal to rewrite a foreign package")
+	}
+}

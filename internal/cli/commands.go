@@ -26,6 +26,7 @@ func Run(ctx context.Context, args []string) error {
 	// one; dev builds and CREGHT_NO_AUTO_UPDATE opt out inside.
 	if len(args) == 0 || args[0] != "update" {
 		notifyAutoUpdate(os.Stderr)
+		cleanupReplacedExecutable()
 		startAutoUpdateIfDue()
 	}
 

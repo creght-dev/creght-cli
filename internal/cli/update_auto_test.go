@@ -246,3 +246,67 @@ func TestLoadUpdateStateTreatsCorruptFileAsEmpty(t *testing.T) {
 		t.Fatalf("state = %+v, want empty", state)
 	}
 }
+
+// Two starts can race the throttle stamp and both spawn a worker. Only one may
+// install: concurrent installs are what leaves a half-updated install behind.
+func TestAcquireAutoUpdateLockAdmitsOneWorkerAtATime(t *testing.T) {
+	swapUpdateStateDir(t)
+
+	release, ok := acquireAutoUpdateLock()
+	if !ok {
+		t.Fatalf("the first worker must get the lock")
+	}
+	if _, ok := acquireAutoUpdateLock(); ok {
+		t.Fatalf("a second worker must not get the lock while the first holds it")
+	}
+
+	release()
+	release2, ok := acquireAutoUpdateLock()
+	if !ok {
+		t.Fatalf("the lock must be free again once it is released")
+	}
+	release2()
+}
+
+// A worker killed mid-install (a reboot, a sleep, an OOM) never releases its
+// lock. A lock nobody will release must not disable updates for good.
+func TestAcquireAutoUpdateLockTakesOverAnAbandonedLock(t *testing.T) {
+	dir := swapUpdateStateDir(t)
+
+	path := filepath.Join(dir, "update.lock")
+	if err := os.WriteFile(path, []byte("999999\n"), 0o600); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+	stale := time.Now().Add(-2 * autoUpdateLockStaleAfter)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("age the lock: %v", err)
+	}
+
+	release, ok := acquireAutoUpdateLock()
+	if !ok {
+		t.Fatalf("a lock older than the stale window must be taken over")
+	}
+	release()
+}
+
+func TestRunUpdateAutoDoesNothingWhileAnotherWorkerHoldsTheLock(t *testing.T) {
+	swapUpdateStateDir(t)
+	t.Cleanup(swapVersion("0.12.1"))
+
+	release, ok := acquireAutoUpdateLock()
+	if !ok {
+		t.Fatalf("seed the lock: not acquired")
+	}
+	t.Cleanup(release)
+
+	// No release server is configured, so a worker that got past the lock would
+	// try to reach GitHub and fail rather than return quietly.
+	output := captureStdout(t, func() {
+		if err := runUpdate(context.Background(), []string{"--auto"}); err != nil {
+			t.Fatalf("runUpdate --auto: %v", err)
+		}
+	})
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("output = %q, want the locked-out worker to do nothing", output)
+	}
+}

@@ -9,9 +9,16 @@ package cli
 // Checks are throttled to one per autoUpdateCheckInterval via last_check_at in
 // update-state.json (next to config.json). The stamp is written before the
 // worker is spawned, so a worker that fails — offline, an unwritable install
-// dir — is not retried until the interval passes. Two CLI starts racing the
-// stamp can both spawn a worker; that is benign, the binary swap is an atomic
-// rename and the loser just finds itself up to date.
+// dir — is not retried until the interval passes. Two CLI starts can still race
+// the stamp and both spawn a worker; update.lock in the same directory then
+// lets exactly one of them install, and the loser exits without touching the
+// binary.
+//
+// The one invariant the whole flow is built around: at no point may there be no
+// working creght. The install itself is a single rename over the binary, the new
+// binary must print its own version before the update counts as done, and a
+// binary that fails that check is rolled back — because the command that would
+// repair a broken install is the one that just broke.
 
 import (
 	"encoding/json"
@@ -20,11 +27,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const autoUpdateCheckInterval = time.Hour
+
+// autoUpdateLockStaleAfter is how long a lock file is honoured before it is
+// treated as abandoned. A worker killed mid-install (a reboot, a sleep, an OOM)
+// leaves its lock behind, and a lock nobody will ever release must not disable
+// updates for good. It is well past the worst-case download.
+const autoUpdateLockStaleAfter = 30 * time.Minute
 
 // autoUpdateEnvOptOut disables the background check and install entirely when
 // set to any non-empty value. Manual `creght update` keeps working.
@@ -92,6 +106,69 @@ func saveUpdateState(state updateState) error {
 	return os.WriteFile(path, bs, 0o600)
 }
 
+func updateLockPath() (string, error) {
+	dir, err := updateStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "update.lock"), nil
+}
+
+// acquireAutoUpdateLock takes the single-flight lock the background worker
+// installs under, and reports whether it got it. Two workers installing at once
+// is the kind of interleaving that leaves a half-updated install behind, so a
+// worker that does not get the lock simply exits: the next start will check
+// again.
+func acquireAutoUpdateLock() (release func(), ok bool) {
+	path, err := updateLockPath()
+	if err != nil {
+		return nil, false
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, false
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if os.IsExist(err) {
+		info, statErr := os.Stat(path)
+		if statErr != nil || time.Since(info.ModTime()) < autoUpdateLockStaleAfter {
+			return nil, false
+		}
+		// The holder is gone; take the lock over.
+		if err := os.Remove(path); err != nil {
+			return nil, false
+		}
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	fmt.Fprintf(file, "%d\n", os.Getpid())
+	_ = file.Close()
+
+	return func() { _ = os.Remove(path) }, true
+}
+
+// cleanupReplacedExecutable removes the copy of the previous binary that the
+// Windows swap has to park beside the running image, since the running one
+// cannot be replaced there. It is dead weight from the moment the process that
+// left it exited, and every later start is free to delete it.
+//
+// It cannot delete one out from under an update that is still running: Windows
+// refuses to unlink an image a live process is executing, which is the same rule
+// that forces the rename-aside in the first place.
+func cleanupReplacedExecutable() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	exePath, err := runningExecutable()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(replacedExecutablePath(exePath))
+}
+
 // recordAutoUpdate is called by the background worker after a successful
 // install, so the next start can tell the user what happened.
 func recordAutoUpdate(from string, to string) error {
@@ -111,6 +188,12 @@ func recordAutoUpdate(from string, to string) error {
 // is kept pending for the run that is actually on the new version, so the
 // message never claims a version the user is not on.
 func notifyAutoUpdate(w io.Writer) {
+	if os.Getenv(autoUpdateEnvOptOut) != "" {
+		// The opt-out covers the notice too, which also keeps the worker's
+		// version smoke test — it runs with the opt-out set — from consuming a
+		// notice into its own captured output.
+		return
+	}
 	current := strings.TrimSpace(version)
 	if current == "dev" {
 		// A dev build is outside the auto-update flow; consuming the notice
