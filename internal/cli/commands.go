@@ -251,6 +251,29 @@ Output is JSON: {"imports":{<specifier>:<url>},"sources":{<specifier>:"builtin"
 		withExample(`  creght importmap
   creght importmap --ref=local
   creght importmap --site_id=<pid>/<sid>`)))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"runtime"}, "runtime [section]", "Print what a site's runtime provides: packages (with SSR support) and platform limits.", runRuntime, func(flags *pflag.FlagSet) {
+		addSiteIDFlag(flags)
+		flags.String("dir", ".", "Local Creght project directory.")
+		flags.String("ref", "remote", "Which talizen.config to read for packages: remote | local.")
+	},
+		withLong(`Print the runtime a site runs on, as the platform reports it for the current
+API host (clusters can differ). Run it before adding a third-party package or a
+large static file instead of assuming what the platform provides.
+
+Sections (pass one to print only that part):
+  packages  every importMap specifier the site can import: {url, source, ssr}.
+            source is "builtin" or the config file that added it. ssr is true
+            only for platform built-ins; a project-added package works in the
+            browser but breaks SSR if imported at module top level.
+  limits    platform hard limits, e.g. public_file_max_bytes for files under
+            public/.
+Other sections the platform adds appear automatically.
+
+--ref remote (default) reads the live remote talizen.config; --ref local reads
+the workspace copy. Inside a pulled workspace, --site_id is optional.`),
+		withExample(`  creght runtime
+  creght runtime packages --ref=local
+  creght runtime limits`)))
 	root.AddCommand(urlCommand(ctx, rawArgs, "url", "Print a site's preview, live and editor addresses."))
 	root.AddCommand(urlCommand(ctx, rawArgs, "preview", "Print a site's addresses; alias of creght url."))
 	root.AddCommand(publishCommand(ctx, rawArgs))

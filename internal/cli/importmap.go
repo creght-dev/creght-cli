@@ -56,33 +56,38 @@ func runImportMap(ctx context.Context, args []string) error {
 		return fmt.Errorf("get system info: %w", err)
 	}
 
-	var configPath, configBody string
-	switch *ref {
-	case "remote":
-		projectID, realSiteID, err := parseSiteRef(*siteID)
-		if err != nil {
-			return err
-		}
-		files, err := client.GetFileList(ctx, projectID, realSiteID)
-		if err != nil {
-			return err
-		}
-		configPath, configBody = findConfigInRemote(files.List)
-	case "local":
-		localFiles, err := localFileSnapshot(*dir)
-		if err != nil {
-			return err
-		}
-		configPath, configBody = findConfigInSnapshot(localFiles)
-	default:
-		return fmt.Errorf("--ref must be remote or local, got %q", *ref)
-	}
-
-	result, err := effectiveImportMap(info.RenderConfig.ImportMap, configPath, configBody)
+	result, err := siteEffectiveImportMap(ctx, client, info.RenderConfig.ImportMap, *dir, *siteID, *ref)
 	if err != nil {
 		return err
 	}
 	return printJSON(result)
+}
+
+// siteEffectiveImportMap overlays the site's talizen.config imports (read from
+// the remote site or the local workspace, per ref) on the given built-ins.
+func siteEffectiveImportMap(ctx context.Context, client *creght.Client, builtin map[string]string, dir, siteID, ref string) (importMapOutput, error) {
+	var configPath, configBody string
+	switch ref {
+	case "remote":
+		projectID, realSiteID, err := parseSiteRef(siteID)
+		if err != nil {
+			return importMapOutput{}, err
+		}
+		files, err := client.GetFileList(ctx, projectID, realSiteID)
+		if err != nil {
+			return importMapOutput{}, err
+		}
+		configPath, configBody = findConfigInRemote(files.List)
+	case "local":
+		localFiles, err := localFileSnapshot(dir)
+		if err != nil {
+			return importMapOutput{}, err
+		}
+		configPath, configBody = findConfigInSnapshot(localFiles)
+	default:
+		return importMapOutput{}, fmt.Errorf("--ref must be remote or local, got %q", ref)
+	}
+	return effectiveImportMap(builtin, configPath, configBody)
 }
 
 func findConfigInRemote(files []creght.File) (path string, body string) {

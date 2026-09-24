@@ -835,6 +835,18 @@ type RenderConfig struct {
 	IgnoreImportMap []string          `json:"ignore_import_map"`
 }
 
+// GetRenderConfigRaw returns /system/info's render_config field by field,
+// undecoded, so callers can pass through fields this CLI does not model yet.
+func (c *Client) GetRenderConfigRaw(ctx context.Context) (map[string]json.RawMessage, error) {
+	var ret struct {
+		RenderConfig map[string]json.RawMessage `json:"render_config"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/u/system/info", nil, nil, &ret); err != nil {
+		return nil, err
+	}
+	return ret.RenderConfig, nil
+}
+
 func (c *Client) GetSystemInfo(ctx context.Context) (SystemInfo, error) {
 	var ret SystemInfo
 	err := c.do(ctx, http.MethodGet, "/api/u/system/info", nil, nil, &ret)
