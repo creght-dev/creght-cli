@@ -182,6 +182,13 @@ func recordAutoUpdate(from string, to string) error {
 	return saveUpdateState(state)
 }
 
+// isTerminal reports whether f is an interactive terminal rather than a pipe or
+// a file.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
 // notifyAutoUpdate prints the pending notice a background worker left, then
 // clears it so it shows exactly once. While an older binary is still the one
 // running — another copy on PATH, or the swap not yet effective — the notice

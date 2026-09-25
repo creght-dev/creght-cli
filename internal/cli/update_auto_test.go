@@ -310,3 +310,25 @@ func TestRunUpdateAutoDoesNothingWhileAnotherWorkerHoldsTheLock(t *testing.T) {
 		t.Fatalf("output = %q, want the locked-out worker to do nothing", output)
 	}
 }
+
+// The notice goes only to a terminal: a program that captured stderr together
+// with --json output got an unparseable stream.
+func TestIsTerminalFalseForPipesAndFiles(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(w) {
+		t.Fatal("a pipe counts as a terminal")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Fatal("a regular file counts as a terminal")
+	}
+}

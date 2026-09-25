@@ -25,7 +25,13 @@ func Run(ctx context.Context, args []string) error {
 	// worker cannot recurse and a manual update is not raced by an automatic
 	// one; dev builds and CREGHT_NO_AUTO_UPDATE opt out inside.
 	if len(args) == 0 || args[0] != "update" {
-		notifyAutoUpdate(os.Stderr)
+		// The notice is for a person. A program running creght (an agent, a
+		// script parsing --json) often reads stdout and stderr as one stream,
+		// and an unsolicited line breaks it; left pending, the notice shows on
+		// the next run at a terminal instead.
+		if isTerminal(os.Stderr) {
+			notifyAutoUpdate(os.Stderr)
+		}
 		cleanupReplacedExecutable()
 		startAutoUpdateIfDue()
 	}
@@ -100,7 +106,8 @@ dev build is never overwritten.
 
 The CLI also runs this update by itself: a regular command start spawns it in
 the background (at most once per hour), so the next start runs the new version
-and prints a one-line notice. Set CREGHT_NO_AUTO_UPDATE=1 to disable that. The
+and prints a one-line notice on stderr — only when stderr is a terminal, so a
+program reading creght's output never gets it. Set CREGHT_NO_AUTO_UPDATE=1 to disable that. The
 background run logs to update.log next to the CLI's config.json.`),
 		withExample(`  creght update
   creght update --check`)))
