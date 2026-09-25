@@ -185,7 +185,7 @@ func TestRunFuncManagementCommandsAreRemoved(t *testing.T) {
 }
 
 func TestNormalizeTableRecordFilterAcceptsToolFieldNames(t *testing.T) {
-	filter := normalizeTableRecordFilter(map[string]any{
+	filter, err := validateTableRecordFilter(map[string]any{
 		"match": "and",
 		"conditions": []any{
 			map[string]any{
@@ -195,6 +195,9 @@ func TestNormalizeTableRecordFilterAcceptsToolFieldNames(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("validateTableRecordFilter: %v", err)
+	}
 
 	conditions := filter["conditions"].([]any)
 	condition := conditions[0].(map[string]any)

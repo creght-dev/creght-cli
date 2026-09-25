@@ -778,7 +778,39 @@ func tableCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 			return runTable(ctx, originalArgsAfter(rawArgs, []string{"table"}))
 		},
 	}
-	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "list", "List table records.", runTable, addTableRecordListFlags))
+	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "list", "List table records, filtered and sorted by the platform.", runTable, addTableRecordListFlags,
+		withLong(`List a table's records as JSON: {"total", "has_more", "list"}. The platform
+filters, sorts and pages, so filter here instead of fetching everything and
+filtering locally — a table larger than --limit would otherwise be cut off.
+
+--filter takes a JSON object, inline (a value starting with {) or a file path:
+  {"conditions":[{"fieldId":"<field>","operator":"<op>","value":<value>}, ...]}
+Every condition must hold (AND). There is no OR: run one query per branch.
+  fieldId   a record field: "channel_id", or "body.channel_id" as in --order_by
+  operator  eq, neq, in (value is an array), gt, gte, lt, lte,
+            between (value is [from, to], both inclusive)
+            gt/gte/lt/lte/between compare numbers as numbers and strings in
+            lexical order, so ISO dates ("2026-09-16") compare correctly
+  value     a JSON value compared with the field as stored (types matter:
+            "100" does not equal 100)
+A filter with an unknown key, a condition without fieldId/operator/value, or
+an unsupported operator is an error — it is never silently ignored.
+
+--where is the equality shorthand {"<field>": <value>, ...}, inline or a file.
+
+--order_by is "<column> asc|desc", comma separated. System columns: id, sort,
+user_id, created_at, updated_at; business fields need body., e.g.
+"body.views desc".
+
+has_more is true when more records match than were returned: page with
+--offset, or raise --limit (at most 1000).`),
+		withExample(`  creght table record list --site_id=<pid>/<sid> --table=social_posts --limit=50
+  creght table record list --site_id=<pid>/<sid> --table=social_posts \
+    --filter='{"conditions":[{"fieldId":"channel_id","operator":"eq","value":"p9mmtm4fbyxe"}]}'
+  creght table record list --site_id=<pid>/<sid> --table=social_posts --order_by="body.views desc" --limit=10 \
+    --filter='{"conditions":[{"fieldId":"published_at","operator":"gte","value":"2026-09-16"}]}'
+  creght table record list --site_id=<pid>/<sid> --table=social_posts --where='{"status":"published"}'
+  creght table record list --site_id=<pid>/<sid> --table=social_posts --filter=./filter.json`)))
 	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "get", "Get a table record.", runTable, addTableRecordGetFlags))
 	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "create", "Create a table record.", runTable, addTableRecordCreateFlags))
 	recordCmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"table"}, "update", "Update a table record.", runTable, addTableRecordUpdateFlags))
@@ -971,9 +1003,9 @@ func addTableRecordListFlags(flags *pflag.FlagSet) {
 	addTableRecordBaseFlags(flags)
 	flags.Int("limit", 20, "Result limit.")
 	flags.Int("offset", 0, "Result offset.")
-	flags.String("order_by", "", "Order by.")
-	flags.String("where", "", "Simple equality filter JSON file.")
-	flags.String("filter", "", "Structured filter JSON file.")
+	flags.String("order_by", "", `Sort: "<column> asc|desc", comma separated; business fields as body.<key>.`)
+	flags.String("where", "", `Equality shorthand {"<field>": <value>}: inline JSON or a file path.`)
+	flags.String("filter", "", `Structured filter {"conditions":[{"fieldId","operator","value"}]}: inline JSON or a file path.`)
 }
 
 func addTableRecordGetFlags(flags *pflag.FlagSet) {

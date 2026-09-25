@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -248,8 +249,8 @@ func runTableRecordList(ctx context.Context, args []string) error {
 	limit := fs.Int("limit", 20, "result limit")
 	offset := fs.Int("offset", 0, "result offset")
 	orderBy := fs.String("order_by", "", "order by")
-	wherePath := fs.String("where", "", "simple equality filter JSON file")
-	filterPath := fs.String("filter", "", "structured filter JSON file")
+	whereArg := fs.String("where", "", "equality filter: inline JSON or a JSON file")
+	filterArg := fs.String("filter", "", "structured filter: inline JSON or a JSON file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -270,19 +271,23 @@ func runTableRecordList(ctx context.Context, args []string) error {
 	query := paginationQuery(*limit, *offset)
 	setQuery(query, "order_by", *orderBy)
 	body := map[string]any{}
-	if strings.TrimSpace(*wherePath) != "" {
-		where, err := readJSONObject(*wherePath)
+	if strings.TrimSpace(*whereArg) != "" {
+		where, err := readJSONObjectArg("where", *whereArg)
 		if err != nil {
 			return err
 		}
-		body["where"] = where
+		if body["where"], err = normalizeTableRecordWhere(where); err != nil {
+			return err
+		}
 	}
-	if strings.TrimSpace(*filterPath) != "" {
-		filter, err := readJSONObject(*filterPath)
+	if strings.TrimSpace(*filterArg) != "" {
+		filter, err := readJSONObjectArg("filter", *filterArg)
 		if err != nil {
 			return err
 		}
-		body["filter"] = normalizeTableRecordFilter(filter)
+		if body["filter"], err = validateTableRecordFilter(filter); err != nil {
+			return err
+		}
 	}
 	var requestBody any
 	if len(body) > 0 {
@@ -300,6 +305,11 @@ func runTableRecordList(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// has_more is in the JSON for programs; the reminder is for a person, and
+	// only a terminal gets it so a merged stdout+stderr stream stays valid JSON.
+	if res.HasMore && isTerminal(os.Stderr) {
+		fmt.Fprintf(os.Stderr, "has_more: %d of %d records shown; page with --offset=%d or raise --limit (max 1000)\n", len(res.List), res.Total, *offset+len(res.List))
+	}
 	return printJSON(res)
 }
 
@@ -609,32 +619,4 @@ func readJSONRawRequired(path string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("JSON file path is required")
 	}
 	return raw, nil
-}
-
-func normalizeTableRecordFilter(filter map[string]any) map[string]any {
-	conditions, ok := filter["conditions"].([]any)
-	if !ok {
-		return filter
-	}
-	nextConditions := make([]any, 0, len(conditions))
-	for _, item := range conditions {
-		condition, ok := item.(map[string]any)
-		if !ok {
-			nextConditions = append(nextConditions, item)
-			continue
-		}
-		if _, ok := condition["fieldId"]; !ok {
-			if value, ok := condition["field_id"]; ok {
-				condition["fieldId"] = value
-			}
-		}
-		if _, ok := condition["value"]; !ok {
-			if values, ok := condition["values"]; ok {
-				condition["value"] = values
-			}
-		}
-		nextConditions = append(nextConditions, condition)
-	}
-	filter["conditions"] = nextConditions
-	return filter
 }
