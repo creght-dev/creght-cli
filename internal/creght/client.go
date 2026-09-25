@@ -978,6 +978,11 @@ type SitePublishState struct {
 	PublishTargets   []string            `json:"publish_targets"`
 	HasChanges       bool                `json:"has_changes"`
 	WorkspaceChanges []SiteFileChange    `json:"workspace_changes,omitempty"`
+	// ReadOnly is set when the caller is not a project member and reads the
+	// versions only because the project allows public copy. Such a state holds
+	// just the versions and the live version: no domains, publish targets or
+	// unversioned changes.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 // FindVersionByNo resolves a per-site version number to its version, searching

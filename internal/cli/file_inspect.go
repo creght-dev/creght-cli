@@ -498,6 +498,9 @@ func runRemove(ctx context.Context, args []string) error {
 		return err
 	}
 	*dir, *siteID = resolvedDir, resolvedSiteID
+	if err := refuseSnapshotWorkspace(*dir, "rm"); err != nil {
+		return err
+	}
 
 	remotePath, err := resolveWorkspacePath(*dir, positionals[0])
 	if err != nil {

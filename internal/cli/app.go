@@ -403,6 +403,7 @@ func runPull(ctx context.Context, args []string) error {
 	siteID := fs.String("site_id", "", "project_id/site_id")
 	dir := fs.String("dir", ".", "local directory")
 	force := fs.Bool("force", false, "overwrite local files with the remote workspace")
+	versionNo := fs.String("version_no", "", "pull that site version as a read-only snapshot")
 	err := fs.Parse(flagArgs)
 	if err != nil {
 		return err
@@ -424,6 +425,19 @@ func runPull(ctx context.Context, args []string) error {
 
 	if len(positionals) > 1 {
 		return fmt.Errorf("pull accepts at most one <path> argument")
+	}
+	if flagWasSet(fs, "version_no") {
+		if len(positionals) == 1 {
+			return fmt.Errorf("pull --version_no pulls a whole version; it does not take a <path> (use creght version cat <version_no> <path> for one file)")
+		}
+		no, err := parseSnapshotVersionNo(*versionNo)
+		if err != nil {
+			return err
+		}
+		return pullVersionSnapshot(ctx, projectID, realSiteID, *dir, no)
+	}
+	if err := refuseSnapshotWorkspace(*dir, "pull without --version_no"); err != nil {
+		return err
 	}
 	if len(positionals) == 1 {
 		return pullOneFile(ctx, projectID, realSiteID, *dir, positionals[0], *force)
@@ -646,6 +660,9 @@ func runPush(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseSnapshotWorkspace(*dir, "push"); err != nil {
+		return err
+	}
 
 	if len(positionals) > 1 {
 		return fmt.Errorf("push accepts at most one <path> argument")
@@ -704,6 +721,9 @@ func runDiff(ctx context.Context, args []string) error {
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
+		return err
+	}
+	if err := refuseSnapshotWorkspace(*dir, "diff"); err != nil {
 		return err
 	}
 

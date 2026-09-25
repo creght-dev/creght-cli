@@ -100,7 +100,7 @@ func (s *Syncer) requireWorkspace() error {
 	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
 	}
-	return nil
+	return refuseSnapshotWorkspace(s.dir, "syncing")
 }
 
 func (s *Syncer) Push(ctx context.Context) error {
@@ -183,6 +183,9 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 	}
 	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return syncPlanContext{}, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
+	}
+	if err := refuseSnapshotWorkspace(s.dir, "syncing"); err != nil {
+		return syncPlanContext{}, err
 	}
 	if err := s.ensureIgnore(); err != nil {
 		return syncPlanContext{}, err

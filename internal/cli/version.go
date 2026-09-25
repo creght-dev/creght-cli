@@ -183,7 +183,11 @@ func printVersionList(out io.Writer, state creght.SitePublishState, limit int) {
 	}
 
 	if len(versions) == 0 {
-		fmt.Fprintln(out, "No versions yet; run creght version create to snapshot the site")
+		if state.ReadOnly {
+			fmt.Fprintln(out, "No versions yet")
+		} else {
+			fmt.Fprintln(out, "No versions yet; run creght version create to snapshot the site")
+		}
 	} else {
 		w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
 		fmt.Fprintln(w, "\tVERSION\tID\tCREATED\tFROM\tNOTE")
@@ -220,6 +224,12 @@ func printVersionList(out io.Writer, state creght.SitePublishState, limit int) {
 			continue
 		}
 		fmt.Fprintf(out, "pinned: %s -> %s\n", domain.Domain, versionLabel(domain.PublishVersionNo, domain.PublishVersionID))
+	}
+
+	if state.ReadOnly {
+		// A non-member of a public-copy project: the platform shares the versions
+		// and nothing else, so there is no workspace or domain to report.
+		fmt.Fprintln(out, "Read-only: you are not a member; this project shares its versions publicly. Pull one with creght pull --version_no=<version_no> --dir=<dir>")
 	}
 
 	if state.HasChanges {

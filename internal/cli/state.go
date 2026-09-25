@@ -23,6 +23,9 @@ type workspaceState struct {
 	APIHost   string                `json:"api_host,omitempty"`
 	UpdatedAt string                `json:"updated_at"`
 	Files     map[string]stateEntry `json:"files"`
+	// Snapshot is set when the directory holds one site version pulled by
+	// pull --version_no rather than an editable workspace; see snapshot.go.
+	Snapshot *snapshotInfo `json:"snapshot,omitempty"`
 }
 
 type stateEntry struct {

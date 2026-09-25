@@ -130,11 +130,27 @@ local with the remote copy.
 
 Paths matched by a workspace-root .creghtignore are not pulled. The ignore
 file supports gitignore-style comments, negation, and *, ?, and ** wildcards,
-and is itself never synced.`),
+and is itself never synced.
+
+Pulling a version (read-only snapshot):
+  --version_no=<version_no> writes that site version's complete source into
+  --dir instead of the current workspace. Paths are laid out as in a normal
+  pull. The directory must be new, empty (a .git is fine), or a snapshot pulled
+  before; pulling another version into it makes it match that version exactly,
+  deleting files the version does not contain. .git and .creght at its root are
+  left alone, so it can be a git work tree that commits version after version.
+
+  A snapshot is read-only: it records no base state, and push, diff and rm
+  refuse to run in it. <version_no> is the VERSION column of creght version list.
+
+  This also works for a project you are not a member of, as long as it allows
+  public copy: such a project shares its versions (never its unversioned
+  workspace), so --version_no is the only pull available there.`),
 		withExample(`  creght pull --site_id=<pid>/<sid> --dir=./mysite
   creght pull
   creght pull page/Index.tsx
-  creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite --force`)))
+  creght pull page/Index.tsx --site_id=<pid>/<sid> --dir=./mysite --force
+  creght pull --site_id=<pid>/<sid> --version_no=12 --dir=./tpl-v12`)))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "diff", "Show local site file changes before pushing.", runDiff,
 		withLong(`Show what push would change, comparing three versions: the base snapshot in
 .creght/state.json, current local files, and current remote files.
@@ -341,10 +357,17 @@ newest version, the footer says so — run creght version create to capture it.
 
 --json prints the raw publish state, including every version, the live version
 id, the pinned domains, and the exact files that changed since the newest
-version.`),
+version.
+
+It also works for a project you are not a member of, as long as the project
+allows public copy. You then get a read-only view: the versions and which one
+is live, nothing else — no domains, publish targets or unversioned changes —
+and --json carries "read_only": true. Pull a version from it with creght pull
+--version_no=<version_no> --dir=<dir>.`),
 		withExample(`  creght version list
   creght version list --limit=10
-  creght version list --json`)))
+  creght version list --json
+  creght version list --site_id=<pid>/<sid> --json`)))
 	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "publish <version_no>", "Make an existing site version the live one.", runVersion, addVersionPublishFlags,
 		withLong(`Point the live site at an existing version, forward to a newer one or back to
 an older one. Every domain follows it except domains pinned to a specific
@@ -567,6 +590,7 @@ func siteFileCommand(ctx context.Context, rawArgs []string, name string, short s
 		flags.String("dir", ".", "Local Creght project directory.")
 		if name == "pull" {
 			flags.Bool("force", false, "Overwrite local files with the remote workspace.")
+			flags.String("version_no", "", "Pull that site version (a number from creght version list) as a read-only snapshot.")
 		}
 		if name == "push" {
 			flags.Bool("delete", false, "Delete remote files/functions that were removed locally.")
