@@ -113,6 +113,7 @@ background run logs to update.log next to the CLI's config.json.`),
   creght update --check`)))
 	root.AddCommand(projectCommand(ctx, rawArgs))
 	root.AddCommand(tplCommand(ctx, rawArgs))
+	root.AddCommand(refsCommand(ctx, rawArgs))
 	root.AddCommand(siteFileCommand(ctx, rawArgs, "pull", "Download site files into a local workspace.", runPull,
 		withLong(`Download a Creght site into a local workspace and record a base snapshot in
 .creght/state.json for safe 3-way sync.
@@ -591,6 +592,35 @@ func tplCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return cmd
 }
 
+func refsCommand(ctx context.Context, rawArgs []string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "refs",
+		Short: "Search a curated library of well-designed real sites for visual references.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRefs(ctx, originalArgsAfter(rawArgs, []string{"refs"}))
+		},
+	}
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"refs"}, "search", "Find reference designs by industry, site type and page type; --save downloads them.", runRefs, addRefsSearchFlags,
+		withLong(`Search the curated UI reference library (screenshots of well-designed real
+sites, EDMs, A+ modules, KVs...) before deciding a new site's look, a homepage
+or a visual redesign. No login needed.
+
+Values for --industry, --site_type and --page_type come from creght refs vocab
+and must match exactly. Give --page_type only when designing one specific page
+or asset (an EDM, an A+ module, a KV, a pricing page); omit it to get whole-site
+references. When nothing matches exactly the library drops conditions (page
+type last) and says which.
+
+Results are shuffled and spread across styles, so repeat calls return a
+different mix. --save downloads each image resized to 1200px wide as
+<dir>/<id>.jpg, so an agent that reads only local files can open them.`),
+		withExample(`  creght refs search --industry="家居 / 家具 / 生活方式" --site_type=商城
+  creght refs search --industry="工业 / 制造 / B2B" --site_type=外贸B2B --save=./refs
+  creght refs search --industry="家居 / 家具 / 生活方式" --page_type="EDM 邮件" --limit=4 --json`)))
+	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"refs"}, "vocab", "List the valid industry, site type and page type values.", runRefs, addTplJSONFlag))
+	return cmd
+}
+
 func siteFileCommand(ctx context.Context, rawArgs []string, name string, short string, run func(context.Context, []string) error, opts ...cmdOpt) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{name}, name, short, run, func(flags *pflag.FlagSet) {
 		flags.String("site_id", "", "Site reference in <project_id>/<site_id> format. Optional inside a pulled workspace.")
@@ -887,6 +917,15 @@ func addTplListFlags(flags *pflag.FlagSet) {
 	flags.Int("limit", 50, "Result limit.")
 	flags.Int("offset", 0, "Result offset.")
 	flags.Bool("json", false, "Print the raw template list as JSON.")
+}
+
+func addRefsSearchFlags(flags *pflag.FlagSet) {
+	flags.String("industry", "", "The site's industry (required); see creght refs vocab.")
+	flags.String("site_type", "", "The kind of site; see creght refs vocab.")
+	flags.String("page_type", "", "Only when designing one specific page or asset, e.g. \"EDM 邮件\".")
+	flags.Int("limit", 12, "How many references, max 16.")
+	flags.String("save", "", "Download the images into this directory.")
+	flags.Bool("json", false, "Print the result as JSON.")
 }
 
 func addTplJSONFlag(flags *pflag.FlagSet) {

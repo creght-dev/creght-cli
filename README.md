@@ -192,6 +192,23 @@ project's sites in `project_id/site_id` form, ready for `creght pull`:
 creght tpl use <template_id> --name="My Project"
 ```
 
+## UI References
+
+Search a curated library of well-designed real sites (plus EDMs, A+ modules,
+KVs...) for visual references before deciding a new site's look. No login
+needed:
+
+```bash
+creght refs vocab
+creght refs search --industry="家居 / 家具 / 生活方式" --site_type=商城
+creght refs search --industry="工业 / 制造 / B2B" --site_type=外贸B2B --save=./refs
+```
+
+Values must match `creght refs vocab`. `--page_type` narrows to one page or
+asset type; `--save` downloads the images (1200px wide) for agents that read
+local files; `--json` prints machine-readable output. Set `CREGHT_UI_REFS_URL`
+to point at another library.
+
 ## Pull Site Workspace
 
 Download the current remote site workspace into a local directory:
