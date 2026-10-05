@@ -2,7 +2,7 @@
   "name": "creght-cli",
   "version": "0.22.1",
   "description": "Creght CLI for syncing local site code with Creght.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "homepage": "https://github.com/creght-dev/creght-cli#readme",
   "repository": {
     "type": "git",
@@ -22,7 +22,9 @@
     "bin/",
     "scripts/",
     "vendor/",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=18"
