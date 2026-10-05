@@ -67,12 +67,20 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 		Long: fmt.Sprintf(`Local bridge for Creght site code: pull a site into a workspace, edit, diff, push, preview, publish.
 
 %s
+%s
 
 Host order: CREGHT_API_HOST, the workspace's .creght/state.json, the saved default, the built-in.
 CREGHT_API_HOST applies to one command and changes nothing saved; creght config set api_host=<url> moves the default.
 
 Credentials file: %s
-One token per API host; creght logout removes only the current host's.`, helpAPIHostBlock(), helpConfigPath()),
+One token per API host; creght logout removes only the current host's.
+
+CREGHT_TOKEN=<token> makes every command use that token instead of the saved
+login. It is for a program that holds its own Creght token and runs creght for
+the user; pair it with CREGHT_API_HOST so the token goes to the deployment that
+issued it. creght never saves, refreshes or revokes it: when it expires, the
+program that set it has to supply a new one. login and logout refuse to run
+while it is set; creght whoami shows which token is in use.`, helpAPIHostBlock(), helpTokenLine(), helpConfigPath()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
@@ -88,6 +96,19 @@ One token per API host; creght logout removes only the current host's.`, helpAPI
 		return runLogout(ctx, args)
 	}, nil))
 	root.AddCommand(configCommand(ctx, rawArgs))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"whoami"}, "whoami", "Show the API host, where the token in use comes from, and whose it is.", runWhoami, func(flags *pflag.FlagSet) {
+		flags.Bool("json", false, `Print {"api_host","token_source","user"} as JSON; token_source is env, saved or none.`)
+	},
+		withLong(`Show the API host in effect, where the token in use comes from, and the
+account it belongs to.
+
+The token is CREGHT_TOKEN when that variable is set, otherwise the login saved
+by creght login for this host. whoami asks the backend, so a token it no longer
+accepts fails here with the same message any other command would print. With
+no token at all it prints the host and exits non-zero.`),
+		withExample(`  creght whoami
+  creght whoami --json
+  CREGHT_API_HOST=https://creght.cn CREGHT_TOKEN=<token> creght whoami`)))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"update"}, "update", "Update the CLI to the latest release.", runUpdate, func(flags *pflag.FlagSet) {
 		flags.Bool("check", false, "Report the latest release without installing it.")
 		flags.Bool("auto", false, "Run as the detached background auto-update worker.")
@@ -449,6 +470,17 @@ func helpAPIHostBlock() string {
 	}
 
 	return fmt.Sprintf("Current API host: %s\n  source: %s", host, resolved.describe())
+}
+
+// helpTokenLine names the token `creght -h` would use, without asking the
+// backend whether it is still accepted — help has to work offline.
+func helpTokenLine() string {
+	cfg, err := loadConfig()
+	if err != nil {
+		return "Token: unknown (" + err.Error() + ")"
+	}
+
+	return "Token: " + describeToken(cfg)
 }
 
 // helpConfigPath reports where the CLI keeps its saved login tokens, so

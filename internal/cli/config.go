@@ -14,6 +14,8 @@ type Config struct {
 	APIHost string            `json:"api_host"`
 	Token   string            `json:"token,omitempty"`
 	Tokens  map[string]string `json:"tokens,omitempty"`
+	// TokenSource says where Token came from. Set by loadConfig, never saved.
+	TokenSource tokenSource `json:"-"`
 }
 
 func configPath() (string, error) {
@@ -35,9 +37,9 @@ func loadConfig() (Config, error) {
 	if os.IsNotExist(err) {
 		// No saved default yet, but the environment or the surrounding
 		// workspace may still name a host.
-		return Config{
+		return applyEnvToken(Config{
 			APIHost: resolveAPIHost("").Host,
-		}, nil
+		}), nil
 	}
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
@@ -58,8 +60,11 @@ func loadConfig() (Config, error) {
 
 	token := tokenForAPIHost(cfg, cfg.APIHost, legacyAPIHost)
 	cfg.Token = token
+	if token != "" {
+		cfg.TokenSource = tokenSourceSaved
+	}
 
-	return cfg, nil
+	return applyEnvToken(cfg), nil
 }
 
 // saveConfig stores cfg's token under its API host, leaving every other host's

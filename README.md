@@ -65,6 +65,46 @@ The config file contains the default API host and CLI tokens. Tokens are stored 
 When `--web` is omitted, the CLI uses `CREGHT_WEB_HOST` if set. For local API hosts such as `localhost` or `127.0.0.1`, it defaults to `http://localhost:5173`.
 For production, the default API host and default web host are both `https://creght.cn`.
 
+## Token from the environment
+
+A program that already holds a Creght token — Shuttle, for one, which connects
+to Creght over OAuth and runs `creght` for the user — passes it in instead of
+making the user log in to the CLI:
+
+```bash
+CREGHT_API_HOST=https://creght.cn CREGHT_TOKEN=<token> creght pull --site_id=<pid>/<sid> --dir=./mysite
+```
+
+- `CREGHT_TOKEN` outranks the token saved in `config.json` for every command it
+  is set on. It is sent to whichever API host is in effect, so set
+  `CREGHT_API_HOST` alongside it to name the deployment that issued it.
+- The CLI never saves, refreshes or revokes it. When the backend rejects it
+  (401), the error names `CREGHT_TOKEN` and says the program that set it has to
+  supply a new one:
+
+  ```text
+  GET /api/u/project_list: 请登录后操作
+  The token comes from CREGHT_TOKEN and https://creght.cn did not accept it: it has expired, was revoked, or was issued by another Creght deployment. creght does not refresh it; the program that set CREGHT_TOKEN has to supply a new one. Unset CREGHT_TOKEN to use the saved login instead.
+  ```
+
+- `creght login` and `creght logout` refuse to run while it is set, and change
+  nothing: a login would save a token the variable overrides, and a logout
+  would revoke a token the CLI does not own.
+- `creght whoami` (and `creght -h`) show which token is in use.
+
+## Who am I
+
+```bash
+creght whoami
+creght whoami --json
+```
+
+Prints the API host in effect, where the token comes from (`CREGHT_TOKEN`, the
+saved login, or none) and the account it belongs to. It asks the backend, so a
+token that is no longer accepted fails here too. `--json` prints
+`{"api_host","token_source","user"}` with `token_source` one of `env`, `saved`,
+`none`.
+
 ## Logout
 
 Remove the saved CLI login for the current API host:
@@ -744,6 +784,7 @@ preview. The CLI does not render sites locally.
 ```bash
 creght login [--web=https://creght.cn]
 creght logout
+creght whoami [--json]
 creght config get
 creght config set api_host=https://creght.cn
 creght project list
@@ -772,6 +813,7 @@ Command meanings:
 
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
+- `whoami`: Show the API host in effect, where the token in use comes from (`CREGHT_TOKEN` or the saved login), and whose it is.
 - `config`: Show (`config get`) or change (`config set api_host=<url>`) the saved default API host, used when neither `CREGHT_API_HOST` nor a workspace's recorded host applies.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.

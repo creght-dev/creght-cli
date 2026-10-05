@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,38 @@ import (
 type Client struct {
 	baseURL string
 	token   string
-	http    *http.Client
+	// authHint is appended to a 401, naming where the rejected token came from
+	// and what fixes it. See SetAuthHint.
+	authHint string
+	http     *http.Client
+}
+
+// ErrUnauthorized matches (via errors.Is) any error from a request the backend
+// answered with 401: no token, or one it no longer accepts.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// AuthError is a 401 from the backend. Error() carries the request, the
+// backend's message and the client's hint on a line of their own.
+type AuthError struct {
+	Message string
+	Hint    string
+}
+
+func (e *AuthError) Error() string {
+	if e.Hint == "" {
+		return e.Message
+	}
+	return e.Message + "\n" + e.Hint
+}
+
+func (e *AuthError) Is(target error) bool { return target == ErrUnauthorized }
+
+// SetAuthHint sets the line added to a 401. The backend only says the token was
+// not accepted; whether the fix is `creght login` or asking whoever handed the
+// token over for a new one depends on where the token came from, which only
+// the caller knows.
+func (c *Client) SetAuthHint(hint string) {
+	c.authHint = strings.TrimSpace(hint)
 }
 
 func NewClient(baseURL string, token string) *Client {
@@ -114,10 +146,14 @@ func (c *Client) do(ctx context.Context, method string, path string, query url.V
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
 		_ = json.Unmarshal(bs, &apiErr)
+		msg := fmt.Sprintf("%s %s: status %d", method, path, resp.StatusCode)
 		if apiErr.Message != "" {
-			return fmt.Errorf("%s %s: %s", method, path, apiErr.Message)
+			msg = fmt.Sprintf("%s %s: %s", method, path, apiErr.Message)
 		}
-		return fmt.Errorf("%s %s: status %d", method, path, resp.StatusCode)
+		if resp.StatusCode == http.StatusUnauthorized {
+			return &AuthError{Message: msg, Hint: c.authHint}
+		}
+		return errors.New(msg)
 	}
 
 	if out == nil || len(bs) == 0 {
@@ -1084,4 +1120,23 @@ func StringPtr(v string) *string {
 // config, an entry cached by git's credential store, a line pasted into curl.
 func (c *Client) Logout(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/api/p/logout", nil, nil, nil)
+}
+
+// Profile is the signed-in user, as /api/u/profile reports it.
+type Profile struct {
+	ID       FlexID `json:"id"`
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+	Email    string `json:"email"`
+}
+
+// GetProfile returns the user the client's token belongs to.
+func (c *Client) GetProfile(ctx context.Context) (Profile, error) {
+	var ret Profile
+	err := c.do(ctx, http.MethodGet, "/api/u/profile", nil, nil, &ret)
+	if err != nil {
+		return Profile{}, err
+	}
+
+	return ret, nil
 }

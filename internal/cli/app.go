@@ -72,7 +72,9 @@ func clientFromConfig() (*creght.Client, Config, error) {
 		return nil, Config{}, err
 	}
 
-	return creght.NewClient(cfg.APIHost, cfg.Token), cfg, nil
+	client := creght.NewClient(cfg.APIHost, cfg.Token)
+	client.SetAuthHint(authHint(cfg))
+	return client, cfg, nil
 }
 
 func runLogin(ctx context.Context, args []string) error {
@@ -80,6 +82,9 @@ func runLogin(ctx context.Context, args []string) error {
 	webHost := fs.String("web", "", "Creght web host")
 	err := fs.Parse(args)
 	if err != nil {
+		return err
+	}
+	if err := refuseEnvToken("login"); err != nil {
 		return err
 	}
 
@@ -170,6 +175,11 @@ func runLogout(ctx context.Context, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("logout does not accept positional arguments")
+	}
+	// The borrowed token is not ours to revoke, and the saved logins are not
+	// the ones in use, so neither the server nor config.json is touched.
+	if err := refuseEnvToken("logout"); err != nil {
+		return err
 	}
 
 	client, cfg, err := clientFromConfig()
