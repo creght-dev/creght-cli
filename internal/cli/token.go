@@ -12,7 +12,7 @@ import (
 
 // tokenEnvVar names the environment variable that hands the CLI a token.
 //
-// It exists for a host program (Shuttle) that holds its own Creght OAuth access
+// It exists for a host program that holds its own Creght OAuth access
 // token and runs creght on the user's behalf: the user should not have to log
 // in to the CLI a second time. The token belongs to that program, so the CLI
 // only borrows it — it never saves, refreshes or revokes it.

@@ -15,7 +15,8 @@ npm install -g creght-cli
 Build from source:
 
 ```bash
-cd /Users/bysir/dev/bysir/creght-cli
+git clone https://github.com/creght-dev/creght-cli.git
+cd creght-cli
 go build -o creght ./cmd/creght
 ```
 
@@ -67,8 +68,8 @@ For production, the default API host and default web host are both `https://creg
 
 ## Token from the environment
 
-A program that already holds a Creght token — Shuttle, for one, which connects
-to Creght over OAuth and runs `creght` for the user — passes it in instead of
+A program that already holds a Creght token — say, an app that connects to
+Creght over OAuth and runs `creght` for the user — passes it in instead of
 making the user log in to the CLI:
 
 ```bash
