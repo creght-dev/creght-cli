@@ -1,11 +1,12 @@
-package cli
+package workspace
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,10 @@ type Syncer struct {
 	siteID    string
 	dir       string
 	clientID  string
+	// apiHost is stamped on the workspace state the first time it is written.
+	apiHost string
+	// out receives the progress and plan lines a command would print.
+	out io.Writer
 	// ignoredRemote records the remote paths refreshRemote dropped because
 	// .creghtignore matched them, so push and diff can name what is still on
 	// the site instead of hiding it.
@@ -30,23 +35,26 @@ type Syncer struct {
 }
 
 type localFileAction struct {
-	remotePath string
-	action     creght.SiteActionChange
+	RemotePath string
+	Action     creght.SiteActionChange
 }
 
 type syncPlanContext struct {
 	plan       syncPlan
-	state      workspaceState
+	state      WorkspaceState
 	hasState   bool
-	localFiles map[string]snapshotEntry
+	localFiles map[string]SnapshotEntry
 }
 
-func NewSyncer(client *creght.Client, projectID string, siteID string, dir string) (*Syncer, error) {
+func NewSyncer(client *creght.Client, projectID string, siteID string, dir string, apiHost string, out io.Writer) (*Syncer, error) {
+	if out == nil {
+		out = io.Discard
+	}
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sync dir: %w", err)
 	}
-	ignore, err := loadCreghtIgnore(absDir)
+	ignore, err := LoadCreghtIgnore(absDir)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +64,9 @@ func NewSyncer(client *creght.Client, projectID string, siteID string, dir strin
 		projectID:    projectID,
 		siteID:       siteID,
 		dir:          absDir,
-		clientID:     newClientID(),
+		clientID:     NewClientID(),
+		apiHost:      apiHost,
+		out:          out,
 		ignore:       ignore,
 		remoteByPath: map[string]creght.File{},
 	}, nil
@@ -66,7 +76,7 @@ func (s *Syncer) ensureIgnore() error {
 	if s.ignore != nil {
 		return nil
 	}
-	ignore, err := loadCreghtIgnore(s.dir)
+	ignore, err := LoadCreghtIgnore(s.dir)
 	if err != nil {
 		return err
 	}
@@ -74,7 +84,7 @@ func (s *Syncer) ensureIgnore() error {
 	return nil
 }
 
-func newClientID() string {
+func NewClientID() string {
 	var b [16]byte
 	_, err := rand.Read(b[:])
 	if err != nil {
@@ -87,7 +97,7 @@ func newClientID() string {
 // requireWorkspace 校验 s.dir 是一个已 pull 的、属于目标站点的工作区。
 // push/sync/diff 不允许把任意目录隐式当作工作区（曾发生误从无关目录 push 导致整棵仓库被上传）。
 func (s *Syncer) requireWorkspace() error {
-	state, hasState, err := loadWorkspaceState(s.dir)
+	state, hasState, err := LoadWorkspaceState(s.dir)
 	if err != nil {
 		return err
 	}
@@ -100,68 +110,100 @@ func (s *Syncer) requireWorkspace() error {
 	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
 	}
-	return refuseSnapshotWorkspace(s.dir, "syncing")
+	return RefuseSnapshotWorkspace(s.dir, "syncing")
 }
 
-func (s *Syncer) Push(ctx context.Context) error {
+// FileChange is one change push made to the remote site.
+type FileChange struct {
+	Path string `json:"path"`
+	// Action is file_create, file_update or file_delete.
+	Action string `json:"action"`
+}
+
+// PushReport is what a push did.
+type PushReport struct {
+	Changes []FileChange
+	// SkippedConflicts are files PushSafe's skipConflicts left out; they keep
+	// their base so a later pull can still merge them.
+	SkippedConflicts []string
+}
+
+func fileChanges(actions []localFileAction) []FileChange {
+	changes := make([]FileChange, 0, len(actions))
+	for _, a := range actions {
+		changes = append(changes, FileChange{Path: a.RemotePath, Action: a.Action.Action})
+	}
+	return changes
+}
+
+// Push overwrites the remote site with the local workspace (push --force):
+// every local file that differs is uploaded and every remote file missing
+// locally is deleted, without a three-way check.
+func (s *Syncer) Push(ctx context.Context) (PushReport, error) {
 	if err := s.requireWorkspace(); err != nil {
-		return err
+		return PushReport{}, err
 	}
 
 	err := os.MkdirAll(s.dir, 0o755)
 	if err != nil {
-		return fmt.Errorf("create local dir: %w", err)
+		return PushReport{}, fmt.Errorf("create local dir: %w", err)
 	}
 
 	err = s.refreshRemote(ctx)
 	if err != nil {
-		return err
+		return PushReport{}, err
 	}
 
-	if err := s.syncLocalSnapshot(ctx); err != nil {
-		return err
+	actions, err := s.syncLocalSnapshot(ctx)
+	if err != nil {
+		return PushReport{}, err
 	}
 
-	return s.saveCurrentState()
+	return PushReport{Changes: fileChanges(actions)}, s.saveCurrentState()
 }
 
 // PushSafe uploads local changes after a three-way comparison. Conflicted
 // files abort the push unless skipConflicts is set, in which case everything
 // else is pushed and the conflicted files keep their base state so a later
 // pull can still merge them.
-func (s *Syncer) PushSafe(ctx context.Context, allowDelete bool, skipConflicts bool) error {
+func (s *Syncer) PushSafe(ctx context.Context, allowDelete bool, skipConflicts bool) (PushReport, error) {
 	planCtx, err := s.buildPlanContext(ctx, allowDelete)
 	if err != nil {
-		return err
+		return PushReport{}, err
 	}
 	plan := planCtx.plan
 	if plan.hasConflicts() && !skipConflicts {
-		printSyncPlan(plan, false)
-		return fmt.Errorf("push has conflicts; run creght pull to merge remote changes (then resolve if needed), use --skip-conflicts to push the rest, or --force to overwrite remote changes")
+		PrintSyncPlan(s.out, plan, false)
+		return PushReport{}, fmt.Errorf("push has conflicts; run creght pull to merge remote changes (then resolve if needed), use --skip-conflicts to push the rest, or --force to overwrite remote changes")
+	}
+	report := PushReport{}
+	for _, c := range plan.Conflicts {
+		report.SkippedConflicts = append(report.SkippedConflicts, c.Path)
 	}
 	if !plan.hasChanges() {
-		printSyncPlan(plan, false)
+		PrintSyncPlan(s.out, plan, false)
 		if err := s.saveMergedState(planCtx); err != nil {
-			return err
+			return PushReport{}, err
 		}
-		return nil
+		return report, nil
 	}
 	if err := s.applyPlan(ctx, plan); err != nil {
-		return err
+		return PushReport{}, err
 	}
+	report.Changes = fileChanges(plan.FileActions)
 	if err := s.refreshRemote(ctx); err != nil {
-		return err
+		return report, err
 	}
 	if err := s.saveMergedState(planCtx); err != nil {
-		return err
+		return report, err
 	}
-	printSyncPlan(plan, false)
+	PrintSyncPlan(s.out, plan, false)
 	if plan.hasConflicts() {
-		fmt.Printf("synced %d files, skipped %d conflicted file(s)\n", len(plan.FileActions), len(plan.Conflicts))
+		fmt.Fprintf(s.out, "synced %d files, skipped %d conflicted file(s)\n", len(plan.FileActions), len(plan.Conflicts))
 	} else {
-		fmt.Printf("synced %d files\n", len(plan.FileActions))
+		fmt.Fprintf(s.out, "synced %d files\n", len(plan.FileActions))
 	}
-	return nil
+	return report, nil
 }
 
 func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPlanContext, error) {
@@ -170,7 +212,7 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 		return syncPlanContext{}, fmt.Errorf("create local dir: %w", err)
 	}
 
-	state, hasState, err := loadWorkspaceState(s.dir)
+	state, hasState, err := LoadWorkspaceState(s.dir)
 	if err != nil {
 		return syncPlanContext{}, err
 	}
@@ -184,25 +226,25 @@ func (s *Syncer) buildPlanContext(ctx context.Context, allowDelete bool) (syncPl
 	if strings.TrimSpace(state.SiteID) != "" && state.SiteID != s.siteRef() {
 		return syncPlanContext{}, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, s.siteRef())
 	}
-	if err := refuseSnapshotWorkspace(s.dir, "syncing"); err != nil {
+	if err := RefuseSnapshotWorkspace(s.dir, "syncing"); err != nil {
 		return syncPlanContext{}, err
 	}
 	if err := s.ensureIgnore(); err != nil {
 		return syncPlanContext{}, err
 	}
-	state.Files = filterIgnoredState(s.ignore, state.Files)
+	state.Files = FilterIgnoredState(s.ignore, state.Files)
 
 	if err := s.refreshRemote(ctx); err != nil {
 		return syncPlanContext{}, err
 	}
 
-	localFiles, err := localFileSnapshot(s.dir)
+	localFiles, err := LocalFileSnapshot(s.dir)
 	if err != nil {
 		return syncPlanContext{}, err
 	}
 
 	remoteFiles := s.currentRemoteFileSnapshot()
-	plan := buildSyncPlan(state, hasState, localFiles, remoteFiles, allowDelete)
+	plan := BuildSyncPlan(state, hasState, localFiles, remoteFiles, allowDelete)
 	plan.IgnoredRemote = s.currentIgnoredRemote()
 	return syncPlanContext{
 		plan:       plan,
@@ -216,7 +258,7 @@ func (s *Syncer) applyPlan(ctx context.Context, plan syncPlan) error {
 	if len(plan.FileActions) > 0 {
 		changes := make([]creght.SiteActionChange, 0, len(plan.FileActions))
 		for _, action := range plan.FileActions {
-			changes = append(changes, action.action)
+			changes = append(changes, action.Action)
 		}
 		if _, err := s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, changes); err != nil {
 			return err
@@ -239,59 +281,59 @@ func (s *Syncer) refreshRemote(ctx context.Context) error {
 
 	s.remoteByPath = make(map[string]creght.File, len(files.List))
 	for _, file := range files.List {
-		if file.IsDir || s.ignore.matches(file.Path) {
+		if file.IsDir || s.ignore.Matches(file.Path) {
 			continue
 		}
 		s.remoteByPath[file.Path] = file
 	}
-	s.ignoredRemote = ignoredRemotePaths(s.ignore, files.List)
+	s.ignoredRemote = IgnoredRemotePaths(s.ignore, files.List)
 
 	return nil
 }
 
-func (s *Syncer) syncLocalSnapshot(ctx context.Context) error {
+func (s *Syncer) syncLocalSnapshot(ctx context.Context) ([]localFileAction, error) {
 	actions, err := s.collectLocalSnapshotActions()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(actions) == 0 {
-		fmt.Println("No local changes to push")
-		return nil
+		fmt.Fprintln(s.out, "No local changes to push")
+		return nil, nil
 	}
 
 	backupDir, err := s.backupDivergedRemoteFiles(actions)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if backupDir != "" {
-		fmt.Printf("Backed up overwritten remote files to %s\n", backupDir)
+		fmt.Fprintf(s.out, "Backed up overwritten remote files to %s\n", backupDir)
 	}
 
 	changes := make([]creght.SiteActionChange, 0, len(actions))
 	for _, action := range actions {
-		changes = append(changes, action.action)
+		changes = append(changes, action.Action)
 	}
 
 	_, err = s.client.DoSiteAction(ctx, s.projectID, s.siteID, s.clientID, changes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = s.refreshRemote(ctx)
 	if err != nil {
-		return err
+		return actions, err
 	}
 
-	fmt.Printf("synced %d files\n", len(actions))
-	return nil
+	fmt.Fprintf(s.out, "synced %d files\n", len(actions))
+	return actions, nil
 }
 
 // backupDivergedRemoteFiles saves remote copies that the given actions will
 // overwrite or delete when the remote content diverged from the recorded base
 // — i.e. remote edits that exist nowhere locally and would otherwise be lost.
 func (s *Syncer) backupDivergedRemoteFiles(actions []localFileAction) (string, error) {
-	state, hasState, err := loadWorkspaceState(s.dir)
+	state, hasState, err := LoadWorkspaceState(s.dir)
 	if err != nil {
 		return "", err
 	}
@@ -299,34 +341,37 @@ func (s *Syncer) backupDivergedRemoteFiles(actions []localFileAction) (string, e
 	toBackup := map[string]string{}
 	s.mu.Lock()
 	for _, action := range actions {
-		remote, ok := s.remoteByPath[action.remotePath]
+		remote, ok := s.remoteByPath[action.RemotePath]
 		if !ok {
 			continue
 		}
 		hash := strings.TrimSpace(remote.Hash)
 		if hash == "" {
-			hash, _ = qetagHash([]byte(remote.Body))
+			hash, _ = QetagHash([]byte(remote.Body))
 		}
 		if hasState {
-			if base, ok := state.Files[action.remotePath]; ok && base.Hash == hash {
+			if base, ok := state.Files[action.RemotePath]; ok && base.Hash == hash {
 				continue
 			}
 		}
-		toBackup[action.remotePath] = remote.Body
+		toBackup[action.RemotePath] = remote.Body
 	}
 	s.mu.Unlock()
 
 	if len(toBackup) == 0 {
 		return "", nil
 	}
-	return writeBackupFiles(s.dir, "remote", toBackup)
+	return WriteBackupFiles(s.dir, "remote", toBackup)
 }
+
+// Dir is the workspace root, made absolute.
+func (s *Syncer) Dir() string { return s.dir }
 
 func (s *Syncer) siteRef() string {
 	return s.projectID + "/" + s.siteID
 }
 
-func (s *Syncer) currentRemoteFileSnapshot() map[string]snapshotEntry {
+func (s *Syncer) currentRemoteFileSnapshot() map[string]SnapshotEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -334,7 +379,7 @@ func (s *Syncer) currentRemoteFileSnapshot() map[string]snapshotEntry {
 	for _, file := range s.remoteByPath {
 		files = append(files, file)
 	}
-	return remoteFileSnapshot(files)
+	return RemoteFileSnapshot(files)
 }
 
 func (s *Syncer) currentIgnoredRemote() []string {
@@ -345,30 +390,32 @@ func (s *Syncer) currentIgnoredRemote() []string {
 }
 
 func (s *Syncer) saveCurrentState() error {
-	return saveWorkspaceState(s.dir, s.siteRef(), s.currentRemoteFileSnapshot())
+	return SaveWorkspaceState(s.dir, s.siteRef(), s.apiHost, s.currentRemoteFileSnapshot())
 }
 
 func (s *Syncer) saveMergedState(planCtx syncPlanContext) error {
-	return saveWorkspaceState(
+	return SaveWorkspaceState(
 		s.dir,
 		s.siteRef(),
-		mergeStateSnapshot(planCtx.state.Files, planCtx.hasState, planCtx.localFiles, s.currentRemoteFileSnapshot()),
+		s.apiHost,
+		MergeStateSnapshot(planCtx.state.Files, planCtx.hasState, planCtx.localFiles, s.currentRemoteFileSnapshot()),
 	)
 }
 
 func (s *Syncer) saveLocalBaseState() error {
-	state, hasState, err := loadWorkspaceState(s.dir)
+	state, hasState, err := LoadWorkspaceState(s.dir)
 	if err != nil {
 		return err
 	}
-	localFiles, err := localFileSnapshot(s.dir)
+	localFiles, err := LocalFileSnapshot(s.dir)
 	if err != nil {
 		return err
 	}
-	return saveWorkspaceState(
+	return SaveWorkspaceState(
 		s.dir,
 		s.siteRef(),
-		mergeStateSnapshot(state.Files, hasState, localFiles, s.currentRemoteFileSnapshot()),
+		s.apiHost,
+		MergeStateSnapshot(state.Files, hasState, localFiles, s.currentRemoteFileSnapshot()),
 	)
 }
 
@@ -378,8 +425,8 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 	}
 	var actions []localFileAction
 	localPaths := map[string]struct{}{}
-	err := walkWorkspaceFiles(s.dir, func(path string) error {
-		remotePath, err := localPathToRemote(s.dir, path)
+	err := WalkWorkspaceFiles(s.dir, func(path string) error {
+		remotePath, err := LocalPathToRemote(s.dir, path)
 		if err != nil {
 			return err
 		}
@@ -400,13 +447,13 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 
 	s.mu.Lock()
 	for remotePath, remote := range s.remoteByPath {
-		if remote.Readonly || s.ignore.matches(remotePath) {
+		if remote.Readonly || s.ignore.Matches(remotePath) {
 			continue
 		}
 		if _, existsLocally := localPaths[remotePath]; existsLocally {
 			continue
 		}
-		actions = append(actions, deleteFileAction(remotePath))
+		actions = append(actions, DeleteFileAction(remotePath))
 	}
 	s.mu.Unlock()
 
@@ -414,7 +461,7 @@ func (s *Syncer) collectLocalSnapshotActions() ([]localFileAction, error) {
 }
 
 func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error) {
-	remotePath, err := localPathToRemote(s.dir, localPath)
+	remotePath, err := LocalPathToRemote(s.dir, localPath)
 	if err != nil {
 		return localFileAction{}, false, err
 	}
@@ -423,10 +470,10 @@ func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error
 	if err != nil {
 		return localFileAction{}, false, fmt.Errorf("read %s: %w", remotePath, err)
 	}
-	if !isUTF8FileBody(bodyBytes) {
+	if !IsUTF8FileBody(bodyBytes) {
 		return localFileAction{}, false, nil
 	}
-	hash, err := qetagHash(bodyBytes)
+	hash, err := QetagHash(bodyBytes)
 	if err != nil {
 		return localFileAction{}, false, err
 	}
@@ -458,37 +505,37 @@ func (s *Syncer) localFileAction(localPath string) (localFileAction, bool, error
 		}
 	}
 
-	return localFileAction{remotePath: remotePath, action: action}, true, nil
+	return localFileAction{RemotePath: remotePath, Action: action}, true, nil
 }
 
-func printSyncPlan(plan syncPlan, dryRun bool) {
+func PrintSyncPlan(out io.Writer, plan syncPlan, dryRun bool) {
 	prefix := ""
 	if dryRun {
 		prefix = "would "
 	}
 	for _, action := range plan.FileActions {
-		fmt.Printf("%s%s %s\n", prefix, siteActionLabel(action.action.Action), action.remotePath)
+		fmt.Fprintf(out, "%s%s %s\n", prefix, SiteActionLabel(action.Action.Action), action.RemotePath)
 	}
 	for _, path := range plan.SkippedDeletes {
-		fmt.Printf("skip delete %s (use --delete to delete remote files removed locally)\n", path)
+		fmt.Fprintf(out, "skip delete %s (use --delete to delete remote files removed locally)\n", path)
 	}
 	for _, path := range plan.RemoteOnlyUpdates {
-		fmt.Printf("keep remote update %s (local copy is unchanged from last pull)\n", path)
+		fmt.Fprintf(out, "keep remote update %s (local copy is unchanged from last pull)\n", path)
 	}
 	for _, conflict := range plan.Conflicts {
-		fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
+		fmt.Fprintf(out, "conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
 	}
-	printIgnoredRemote(plan.IgnoredRemote, dryRun)
+	printIgnoredRemote(out, plan.IgnoredRemote, dryRun)
 	if !plan.hasChanges() && len(plan.SkippedDeletes) == 0 && len(plan.RemoteOnlyUpdates) == 0 && len(plan.Conflicts) == 0 {
 		if dryRun {
-			fmt.Println("No local changes")
+			fmt.Fprintln(out, "No local changes")
 		} else {
-			fmt.Println("No local changes to push")
+			fmt.Fprintln(out, "No local changes to push")
 		}
 	}
 }
 
-func siteActionLabel(action string) string {
+func SiteActionLabel(action string) string {
 	switch action {
 	case "file_create":
 		return "create"
@@ -509,12 +556,12 @@ func siteActionLabel(action string) string {
 // lists the paths and how to delete one. push gets a single factual line —
 // ignoring a remote path can be deliberate, and a scolding paragraph on every
 // push would train the user to skip the whole summary.
-func printIgnoredRemote(paths []string, detailed bool) {
+func printIgnoredRemote(out io.Writer, paths []string, detailed bool) {
 	if len(paths) == 0 {
 		return
 	}
 	if !detailed {
-		fmt.Printf("ignored %d remote file(s) matched by .creghtignore, still on the site (creght diff lists them)\n", len(paths))
+		fmt.Fprintf(out, "ignored %d remote file(s) matched by .creghtignore, still on the site (creght diff lists them)\n", len(paths))
 		return
 	}
 	const show = 5
@@ -524,17 +571,17 @@ func printIgnoredRemote(paths []string, detailed bool) {
 		listed = listed[:show]
 		suffix = fmt.Sprintf(", and %d more", len(paths)-show)
 	}
-	fmt.Printf(
+	fmt.Fprintf(out,
 		"ignored %d remote file(s) matched by .creghtignore, still live on the site and out of push's reach: %s%s\n",
 		len(paths), strings.Join(listed, ", "), suffix,
 	)
-	fmt.Printf("  delete one with: creght rm <path>\n")
+	fmt.Fprintf(out, "  delete one with: creght rm <path>\n")
 }
 
-func deleteFileAction(remotePath string) localFileAction {
+func DeleteFileAction(remotePath string) localFileAction {
 	return localFileAction{
-		remotePath: remotePath,
-		action: creght.SiteActionChange{
+		RemotePath: remotePath,
+		Action: creght.SiteActionChange{
 			Action: "file_delete",
 			File: creght.SiteActionFileSpec{
 				Path: creght.StringPtr(remotePath),

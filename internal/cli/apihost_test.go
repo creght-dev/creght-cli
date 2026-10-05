@@ -206,7 +206,7 @@ func TestSaveWorkspaceStateRecordsAPIHost(t *testing.T) {
 	t.Chdir(root)
 	t.Setenv("CREGHT_API_HOST", "https://talizen.com")
 
-	if err := saveWorkspaceState(root, "p1/s1", map[string]snapshotEntry{}); err != nil {
+	if err := saveWorkspaceState(root, "p1/s1", currentAPIHost().Host, map[string]snapshotEntry{}); err != nil {
 		t.Fatalf("saveWorkspaceState: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestSaveWorkspaceStateKeepsRecordedAPIHost(t *testing.T) {
 	t.Chdir(root)
 	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
 
-	if err := saveWorkspaceState(root, "p1/s1", map[string]snapshotEntry{}); err != nil {
+	if err := saveWorkspaceState(root, "p1/s1", currentAPIHost().Host, map[string]snapshotEntry{}); err != nil {
 		t.Fatalf("saveWorkspaceState: %v", err)
 	}
 

@@ -1,16 +1,13 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"os"
 	"path/filepath"
 	"strings"
-
-	udiff "github.com/aymanbagabas/go-udiff"
 )
 
 // splitFlagArgs separates positional arguments from flag arguments. Flags are
@@ -163,7 +160,7 @@ func diffOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
-	if ignore.matches(remotePath) {
+	if ignore.Matches(remotePath) {
 		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
 		return nil
 	}
@@ -198,86 +195,6 @@ func diffOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	return nil
 }
 
-// diffJSONEntry / diffJSONOutput are the machine-readable form of a sync plan,
-// so an agent can decide how to resolve without parsing human text. Conflict
-// entries carry the base->local and base->remote diffs plus whether a pull
-// would auto-merge them, when the base content is recorded.
-type diffJSONEntry struct {
-	Path             string `json:"path"`
-	Status           string `json:"status"`
-	Action           string `json:"action,omitempty"`
-	Reason           string `json:"reason,omitempty"`
-	AutoMergeable    *bool  `json:"auto_mergeable,omitempty"`
-	BaseToLocalDiff  string `json:"base_to_local_diff,omitempty"`
-	BaseToRemoteDiff string `json:"base_to_remote_diff,omitempty"`
-}
-
-type diffJSONOutput struct {
-	HasConflicts bool            `json:"has_conflicts"`
-	Files        []diffJSONEntry `json:"files"`
-}
-
-type conflictJSONDetail struct {
-	reason           string
-	autoMergeable    *bool
-	baseToLocalDiff  string
-	baseToRemoteDiff string
-}
-
-// conflictJSONDetails computes per-conflict detail for diff --json from the
-// plan context and the current remote snapshot.
-func conflictJSONDetails(root string, planCtx syncPlanContext, remote map[string]snapshotEntry) map[string]conflictJSONDetail {
-	details := map[string]conflictJSONDetail{}
-	for _, c := range planCtx.plan.Conflicts {
-		detail := conflictJSONDetail{reason: c.Reason}
-		base, baseOK := planCtx.state.Files[c.Path]
-		local, localOK := planCtx.localFiles[c.Path]
-		remoteEntry, remoteOK := remote[c.Path]
-		if baseOK && localOK && remoteOK && !hasConflictMarkers(local.Body) {
-			if baseText, ok := readBaseObject(root, base.Hash); ok {
-				detail.baseToLocalDiff = unifiedLineDiff("base:"+c.Path, "local:"+c.Path, baseText, local.Body)
-				detail.baseToRemoteDiff = unifiedLineDiff("base:"+c.Path, "remote:"+c.Path, baseText, remoteEntry.Body)
-				_, clean := merge3(baseText, local.Body, remoteEntry.Body)
-				detail.autoMergeable = &clean
-			}
-		}
-		details[c.Path] = detail
-	}
-	return details
-}
-
-func printPlanJSON(plan syncPlan, conflictDetails map[string]conflictJSONDetail) error {
-	out := diffJSONOutput{HasConflicts: plan.hasConflicts()}
-	for _, a := range plan.FileActions {
-		out.Files = append(out.Files, diffJSONEntry{Path: a.remotePath, Status: "local-change", Action: a.action.Action})
-	}
-	for _, c := range plan.Conflicts {
-		entry := diffJSONEntry{Path: c.Path, Status: "conflict", Reason: c.Reason}
-		if detail, ok := conflictDetails[c.Path]; ok {
-			entry.Reason = detail.reason
-			entry.AutoMergeable = detail.autoMergeable
-			entry.BaseToLocalDiff = detail.baseToLocalDiff
-			entry.BaseToRemoteDiff = detail.baseToRemoteDiff
-		}
-		out.Files = append(out.Files, entry)
-	}
-	for _, p := range plan.RemoteOnlyUpdates {
-		out.Files = append(out.Files, diffJSONEntry{Path: p, Status: "remote-only"})
-	}
-	for _, p := range plan.NoBaseRemoteDiffs {
-		out.Files = append(out.Files, diffJSONEntry{Path: p, Status: "no-base"})
-	}
-	for _, p := range plan.IgnoredRemote {
-		out.Files = append(out.Files, diffJSONEntry{Path: p, Status: "ignored-remote", Reason: "hidden by .creghtignore; still on the site, push cannot delete it, use creght rm"})
-	}
-	body, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(body))
-	return nil
-}
-
 // pullOneFile downloads a single remote file into the workspace and updates
 // just that file's base state. When the file changed both locally and remotely
 // it three-way merges against the recorded base; overlapping edits write
@@ -291,7 +208,7 @@ func pullOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
-	if ignore.matches(remotePath) {
+	if ignore.Matches(remotePath) {
 		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
 		return nil
 	}
@@ -353,7 +270,7 @@ func pullOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err := writePulledFile(dir, writeEntry); err != nil {
 		return err
 	}
-	if err := putStateFileEntry(dir, projectID+"/"+realSiteID, remoteEntry); err != nil {
+	if err := putStateFileEntry(dir, projectID+"/"+realSiteID, currentAPIHost().Host, remoteEntry); err != nil {
 		return err
 	}
 	if conflicted {
@@ -379,7 +296,7 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if err != nil {
 		return err
 	}
-	if ignore.matches(remotePath) {
+	if ignore.Matches(remotePath) {
 		fmt.Printf("ignored %s by %s\n", remotePath, creghtIgnoreFileName)
 		return nil
 	}
@@ -421,7 +338,7 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 		return fmt.Errorf("%s is readonly", remotePath)
 	}
 	if remoteOK && remoteEntry.Hash == local.Hash {
-		if err := putStateFileEntry(dir, siteRef, remoteEntry); err != nil {
+		if err := putStateFileEntry(dir, siteRef, currentAPIHost().Host, remoteEntry); err != nil {
 			return err
 		}
 		fmt.Printf("%s is already up to date\n", remotePath)
@@ -451,23 +368,14 @@ func pushOneFile(ctx context.Context, projectID string, realSiteID string, dir s
 	if remoteOK {
 		action = updateFileAction(remoteEntry, local.Body)
 	}
-	if _, err := client.DoSiteAction(ctx, projectID, realSiteID, newClientID(), []creght.SiteActionChange{action.action}); err != nil {
+	if _, err := client.DoSiteAction(ctx, projectID, realSiteID, newClientID(), []creght.SiteActionChange{action.Action}); err != nil {
 		return err
 	}
-	if err := putStateFileEntry(dir, siteRef, snapshotEntry{Path: remotePath, Hash: local.Hash, Body: local.Body}); err != nil {
+	if err := putStateFileEntry(dir, siteRef, currentAPIHost().Host, snapshotEntry{Path: remotePath, Hash: local.Hash, Body: local.Body}); err != nil {
 		return err
 	}
 	fmt.Printf("Pushed %s\n", remotePath)
 	return nil
-}
-
-// unifiedLineDiff produces a git-style unified diff: only hunks around changed
-// lines, with 3 lines of context and "@@ -a,b +c,d @@" headers, so a one-line
-// change in a long file prints a few lines instead of the whole file. The diff
-// itself comes from go-udiff, the diff implementation extracted from
-// x/tools (gopls).
-func unifiedLineDiff(aName string, bName string, a string, b string) string {
-	return udiff.Unified(aName, bName, a, b)
 }
 
 // runRemove deletes one remote file, whether or not .creghtignore hides it.
@@ -523,7 +431,7 @@ func runRemove(ctx context.Context, args []string) error {
 		return fmt.Errorf("remote file not found: %s", remotePath)
 	}
 
-	changes := []creght.SiteActionChange{deleteFileAction(remotePath).action}
+	changes := []creght.SiteActionChange{deleteFileAction(remotePath).Action}
 	if _, err := client.DoSiteAction(ctx, projectID, realSiteID, newClientID(), changes); err != nil {
 		return err
 	}
@@ -536,7 +444,7 @@ func runRemove(ctx context.Context, args []string) error {
 	if err == nil {
 		if _, statErr := os.Stat(localPath); statErr == nil {
 			ignore, ignoreErr := loadCreghtIgnore(*dir)
-			if ignoreErr == nil && !ignore.matches(remotePath) {
+			if ignoreErr == nil && !ignore.Matches(remotePath) {
 				fmt.Printf("local copy kept at %s; creght push will re-create the remote file until you delete it locally too\n", localPath)
 			} else {
 				fmt.Printf("local copy kept at %s (ignored by .creghtignore, so push leaves it alone)\n", localPath)

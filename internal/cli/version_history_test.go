@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"strings"
 	"testing"
 )

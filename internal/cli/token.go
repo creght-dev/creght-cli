@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
 // tokenEnvVar names the environment variable that hands the CLI a token.

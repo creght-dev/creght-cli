@@ -1,12 +1,11 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"os"
-	"path"
 	"sort"
 	"strings"
 )
@@ -46,14 +45,6 @@ func versionFiles(ctx context.Context, client *creght.Client, projectID, siteID,
 		files[normalizeSitePath(file.Path)] = file
 	}
 	return files, nil
-}
-
-func normalizeSitePath(p string) string {
-	p = strings.ReplaceAll(p, "\\", "/")
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	return path.Clean(p)
 }
 
 func sortedPaths(sets ...map[string]creght.File) []string {

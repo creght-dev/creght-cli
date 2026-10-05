@@ -1,8 +1,8 @@
-package cli
+package workspace
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-func remotePathToLocal(root string, remotePath string) (string, error) {
+func RemotePathToLocal(root string, remotePath string) (string, error) {
 	remotePath = strings.TrimSpace(remotePath)
 	if remotePath == "" || remotePath == "/" {
 		return "", fmt.Errorf("invalid remote path: %q", remotePath)
@@ -24,7 +24,7 @@ func remotePathToLocal(root string, remotePath string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
-func localPathToRemote(root string, localPath string) (string, error) {
+func LocalPathToRemote(root string, localPath string) (string, error) {
 	rel, err := filepath.Rel(root, localPath)
 	if err != nil {
 		return "", fmt.Errorf("relative path: %w", err)
@@ -36,7 +36,7 @@ func localPathToRemote(root string, localPath string) (string, error) {
 	return "/" + filepath.ToSlash(rel), nil
 }
 
-func isPathInside(root string, path string) bool {
+func IsPathInside(root string, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
@@ -48,11 +48,11 @@ func isPathInside(root string, path string) bool {
 // with the local path. Local paths mirror remote site paths exactly
 // (page/Index.tsx <-> /page/Index.tsx, backend/func/booking.ts <->
 // /backend/func/booking.ts).
-func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
+func WalkWorkspaceFiles(root string, fn func(localPath string) error) error {
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil
 	}
-	ignore, err := loadCreghtIgnore(root)
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
 		if err != nil {
 			return err
 		}
-		if shouldSkipLocalPath(root, path) {
+		if ShouldSkipLocalPath(root, path) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -72,11 +72,11 @@ func walkWorkspaceFiles(root string, fn func(localPath string) error) error {
 		if d.IsDir() {
 			return nil
 		}
-		remotePath, err := localPathToRemote(root, path)
+		remotePath, err := LocalPathToRemote(root, path)
 		if err != nil {
 			return err
 		}
-		if ignore.matches(remotePath) {
+		if ignore.Matches(remotePath) {
 			return nil
 		}
 		return fn(path)
@@ -92,7 +92,7 @@ func rejectLegacyFrontendLayout(root string, ignore *creghtIgnore) error {
 	if err != nil || !info.IsDir() {
 		return nil
 	}
-	if ignore.matches("/frontend") || ignore.matches("/frontend/__creght_ignore_probe__") {
+	if ignore.Matches("/frontend") || ignore.Matches("/frontend/__creght_ignore_probe__") {
 		return nil
 	}
 
@@ -102,7 +102,7 @@ func rejectLegacyFrontendLayout(root string, ignore *creghtIgnore) error {
 		if err != nil {
 			return err
 		}
-		if shouldSkipLocalPath(root, path) {
+		if ShouldSkipLocalPath(root, path) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -112,11 +112,11 @@ func rejectLegacyFrontendLayout(root string, ignore *creghtIgnore) error {
 			return nil
 		}
 		hasFile = true
-		remotePath, err := localPathToRemote(root, path)
+		remotePath, err := LocalPathToRemote(root, path)
 		if err != nil {
 			return err
 		}
-		if !ignore.matches(remotePath) {
+		if !ignore.Matches(remotePath) {
 			hasSyncableFile = true
 			return filepath.SkipAll
 		}
@@ -131,21 +131,21 @@ func rejectLegacyFrontendLayout(root string, ignore *creghtIgnore) error {
 	return nil
 }
 
-func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
+func WriteRemoteFilesToWorkspace(root string, files []creght.File) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
-	ignore, err := loadCreghtIgnore(root)
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return err
 	}
 
 	for _, file := range files {
-		if file.IsDir || ignore.matches(file.Path) {
+		if file.IsDir || ignore.Matches(file.Path) {
 			continue
 		}
 
-		localPath, err := remotePathToLocal(root, file.Path)
+		localPath, err := RemotePathToLocal(root, file.Path)
 		if err != nil {
 			return err
 		}
@@ -168,12 +168,12 @@ func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
 // 这份文件会被 push 进站点，站点又会被复制成模板或别的项目，所以内容里不能写这个站点
 // 特有的信息（project / site ID、编辑器地址）——复制过去就指错了站，而远端已有文件时
 // 不会再生成新的去纠正它。站点身份由 .creght/state.json 记录。
-func ensurePulledAgentsFile(root string, files []creght.File) (bool, error) {
-	ignore, err := loadCreghtIgnore(root)
+func EnsurePulledAgentsFile(root string, files []creght.File) (bool, error) {
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return false, err
 	}
-	if ignore.matches("/AGENTS.md") {
+	if ignore.Matches("/AGENTS.md") {
 		return false, nil
 	}
 	for _, file := range files {
@@ -185,7 +185,7 @@ func ensurePulledAgentsFile(root string, files []creght.File) (bool, error) {
 		}
 	}
 
-	localPath, err := remotePathToLocal(root, "/AGENTS.md")
+	localPath, err := RemotePathToLocal(root, "/AGENTS.md")
 	if err != nil {
 		return false, err
 	}
@@ -249,8 +249,8 @@ creght resolve <path> --ours|--theirs (or edit by hand) before pushing.
 // writeBackupFiles copies path->body contents into a fresh directory under
 // .creght/backup/, mirroring the workspace layout, and returns that directory.
 // label distinguishes what was backed up (e.g. "local", "remote").
-func writeBackupFiles(root string, label string, files map[string]string) (string, error) {
-	backupRoot := filepath.Join(root, stateDirName, "backup")
+func WriteBackupFiles(root string, label string, files map[string]string) (string, error) {
+	backupRoot := filepath.Join(root, StateDirName, "backup")
 	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
@@ -259,7 +259,7 @@ func writeBackupFiles(root string, label string, files map[string]string) (strin
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 	for path, body := range files {
-		localPath, err := remotePathToLocal(dir, path)
+		localPath, err := RemotePathToLocal(dir, path)
 		if err != nil {
 			return "", err
 		}
@@ -276,7 +276,7 @@ func writeBackupFiles(root string, label string, files map[string]string) (strin
 // backupOverwrittenLocalFiles backs up local files that are about to be
 // overwritten by incoming content and whose current content diverged from the
 // recorded base (uncommitted local work). Returns "" when nothing needed it.
-func backupOverwrittenLocalFiles(root string, state workspaceState, hasState bool, localFiles map[string]snapshotEntry, incoming map[string]string) (string, error) {
+func BackupOverwrittenLocalFiles(root string, state WorkspaceState, hasState bool, localFiles map[string]SnapshotEntry, incoming map[string]string) (string, error) {
 	toBackup := map[string]string{}
 	for path, newBody := range incoming {
 		local, ok := localFiles[path]
@@ -293,10 +293,10 @@ func backupOverwrittenLocalFiles(root string, state workspaceState, hasState boo
 	if len(toBackup) == 0 {
 		return "", nil
 	}
-	return writeBackupFiles(root, "local", toBackup)
+	return WriteBackupFiles(root, "local", toBackup)
 }
 
-func shouldSkipLocalPath(root string, path string) bool {
+func ShouldSkipLocalPath(root string, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." {
 		return false
@@ -328,6 +328,6 @@ func shouldSkipLocalPathPart(base string) bool {
 	}
 }
 
-func isUTF8FileBody(body []byte) bool {
+func IsUTF8FileBody(body []byte) bool {
 	return utf8.Valid(body)
 }

@@ -1,4 +1,4 @@
-module bysir/creght-cli
+module github.com/creght-dev/creght-cli
 
 go 1.25
 

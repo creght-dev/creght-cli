@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,24 +228,4 @@ func tokenForAPIHost(cfg Config, apiHost string, legacyAPIHost string) string {
 	}
 
 	return ""
-}
-
-func canonicalAPIHost(apiHost string) string {
-	apiHost = strings.TrimRight(strings.TrimSpace(apiHost), "/")
-	if apiHost == "" {
-		return ""
-	}
-
-	u, err := url.Parse(apiHost)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return apiHost
-	}
-
-	u.Scheme = strings.ToLower(u.Scheme)
-	u.Host = strings.ToLower(u.Host)
-	u.Path = strings.TrimRight(u.Path, "/")
-	u.RawQuery = ""
-	u.Fragment = ""
-
-	return strings.TrimRight(u.String(), "/")
 }

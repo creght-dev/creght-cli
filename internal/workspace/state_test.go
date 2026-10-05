@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"os"
@@ -13,11 +13,11 @@ func TestResolveSiteWorkspaceDiscoversParentAndSiteID(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWorkspaceState(root, "project/site", map[string]snapshotEntry{}); err != nil {
+	if err := SaveWorkspaceState(root, "project/site", "", map[string]SnapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
 
-	gotRoot, gotSiteID, err := resolveSiteWorkspace(nested, "", true, true)
+	gotRoot, gotSiteID, err := ResolveSiteWorkspace(nested, "", true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,11 +35,11 @@ func TestResolveSiteWorkspaceExplicitDirDoesNotSearchParents(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWorkspaceState(root, "outer/site", map[string]snapshotEntry{}); err != nil {
+	if err := SaveWorkspaceState(root, "outer/site", "", map[string]SnapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
 
-	gotRoot, gotSiteID, err := resolveSiteWorkspace(nested, "new/site", false, false)
+	gotRoot, gotSiteID, err := ResolveSiteWorkspace(nested, "new/site", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,20 +53,20 @@ func TestResolveSiteWorkspaceExplicitDirDoesNotSearchParents(t *testing.T) {
 
 func TestResolveSiteWorkspaceRejectsMismatchedSiteID(t *testing.T) {
 	root := t.TempDir()
-	if err := saveWorkspaceState(root, "project/site", map[string]snapshotEntry{}); err != nil {
+	if err := SaveWorkspaceState(root, "project/site", "", map[string]SnapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, err := resolveSiteWorkspace(root, "other/site", true, true)
+	_, _, err := ResolveSiteWorkspace(root, "other/site", true, true)
 	if err == nil {
 		t.Fatal("expected mismatched site id error")
 	}
 }
 
 func TestBuildSyncPlanKeepsRemoteOnlyFilesWithoutBase(t *testing.T) {
-	plan := buildSyncPlan(workspaceState{}, false,
-		map[string]snapshotEntry{},
-		map[string]snapshotEntry{
+	plan := BuildSyncPlan(WorkspaceState{}, false,
+		map[string]SnapshotEntry{},
+		map[string]SnapshotEntry{
 			"/messages/zh-CN.json": {ID: "remote-id", Path: "/messages/zh-CN.json", Hash: "remote-hash"},
 		},
 		false,
@@ -79,15 +79,15 @@ func TestBuildSyncPlanKeepsRemoteOnlyFilesWithoutBase(t *testing.T) {
 
 func TestBuildSyncPlanSkipsDeletesByDefault(t *testing.T) {
 	baseHash := testHash(t, "old\n")
-	state := workspaceState{Files: map[string]stateEntry{
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/messages/en.json": {Hash: baseHash},
 	}}
-	remote := map[string]snapshotEntry{
+	remote := map[string]SnapshotEntry{
 		"/messages/en.json": {ID: "remote-id", Path: "/messages/en.json", Hash: baseHash},
 	}
 
-	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{},
+	plan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{},
 		remote,
 		false,
 	)
@@ -99,27 +99,27 @@ func TestBuildSyncPlanSkipsDeletesByDefault(t *testing.T) {
 		t.Fatalf("got skipped deletes %+v, want /messages/en.json", plan.SkippedDeletes)
 	}
 
-	deletePlan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{},
+	deletePlan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{},
 		remote,
 		true,
 	)
-	if len(deletePlan.FileActions) != 1 || deletePlan.FileActions[0].action.Action != "file_delete" {
+	if len(deletePlan.FileActions) != 1 || deletePlan.FileActions[0].Action.Action != "file_delete" {
 		t.Fatalf("got delete plan %+v, want one file_delete", deletePlan.FileActions)
 	}
 }
 
 func TestBuildSyncPlanKeepsRemoteUpdateWhenLocalUnchanged(t *testing.T) {
 	baseHash := testHash(t, "old\n")
-	state := workspaceState{Files: map[string]stateEntry{
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/page/index.tsx": {Hash: baseHash},
 	}}
 
-	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{
+	plan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: baseHash, Body: "old\n"},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"},
 		},
 		false,
@@ -136,15 +136,15 @@ func TestBuildSyncPlanKeepsRemoteUpdateWhenLocalUnchanged(t *testing.T) {
 func TestBuildPullEntryPlanWritesRemoteUpdateWhenLocalUnchanged(t *testing.T) {
 	baseHash := testHash(t, "old\n")
 	remoteHash := testHash(t, "remote\n")
-	plan := buildPullEntryPlan("file",
-		map[string]stateEntry{
+	plan := BuildPullEntryPlan("file",
+		map[string]StateEntry{
 			"/page/index.tsx": {Hash: baseHash},
 		},
 		true,
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: baseHash, Body: "old\n"},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: remoteHash, Body: "remote\n"},
 		},
 		nil,
@@ -160,15 +160,15 @@ func TestBuildPullEntryPlanWritesRemoteUpdateWhenLocalUnchanged(t *testing.T) {
 
 func TestBuildPullEntryPlanConflictsWhenBothSidesChanged(t *testing.T) {
 	baseHash := testHash(t, "old\n")
-	plan := buildPullEntryPlan("file",
-		map[string]stateEntry{
+	plan := BuildPullEntryPlan("file",
+		map[string]StateEntry{
 			"/page/index.tsx": {Hash: baseHash},
 		},
 		true,
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"},
 		},
 		nil,
@@ -185,15 +185,15 @@ func TestBuildPullEntryPlanConflictsWhenBothSidesChanged(t *testing.T) {
 func TestMergeStateSnapshotPreservesBaseForRemoteOnlyUpdate(t *testing.T) {
 	baseHash := testHash(t, "old\n")
 	remoteHash := testHash(t, "remote\n")
-	next := mergeStateSnapshot(
-		map[string]stateEntry{
+	next := MergeStateSnapshot(
+		map[string]StateEntry{
 			"/page/index.tsx": {Hash: baseHash},
 		},
 		true,
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: baseHash, Body: "old\n"},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: remoteHash, Body: "remote\n"},
 		},
 	)
@@ -205,15 +205,15 @@ func TestMergeStateSnapshotPreservesBaseForRemoteOnlyUpdate(t *testing.T) {
 
 func TestBuildSyncPlanConflictsWhenBothSidesChanged(t *testing.T) {
 	baseHash := testHash(t, "old\n")
-	state := workspaceState{Files: map[string]stateEntry{
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/page/index.tsx": {Hash: baseHash},
 	}}
 
-	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{
+	plan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"},
 		},
 		false,
@@ -230,25 +230,25 @@ func TestBuildSyncPlanConflictsWhenBothSidesChanged(t *testing.T) {
 func TestBuildSyncPlanUpdatesBackendFile(t *testing.T) {
 	baseHash := testHash(t, "export function main() { return 'old' }\n")
 	newBody := "export function main() { return 'new' }\n"
-	state := workspaceState{Files: map[string]stateEntry{
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/backend/func/booking.ts": {Hash: baseHash},
 	}}
 
-	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{
+	plan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{
 			"/backend/func/booking.ts": {Path: "/backend/func/booking.ts", Hash: testHash(t, newBody), Body: newBody},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/backend/func/booking.ts": {ID: "file-id", Path: "/backend/func/booking.ts", Hash: baseHash, Body: "export function main() { return 'old' }\n"},
 		},
 		false,
 	)
 
-	if len(plan.FileActions) != 1 || plan.FileActions[0].action.Action != "file_update" {
+	if len(plan.FileActions) != 1 || plan.FileActions[0].Action.Action != "file_update" {
 		t.Fatalf("got file actions %+v, want one file_update", plan.FileActions)
 	}
-	if plan.FileActions[0].remotePath != "/backend/func/booking.ts" {
-		t.Fatalf("got remote path %q, want /backend/func/booking.ts", plan.FileActions[0].remotePath)
+	if plan.FileActions[0].RemotePath != "/backend/func/booking.ts" {
+		t.Fatalf("got remote path %q, want /backend/func/booking.ts", plan.FileActions[0].RemotePath)
 	}
 }
 
@@ -256,11 +256,11 @@ func TestBuildPullEntryPlanAutoMergesBothChanged(t *testing.T) {
 	baseBody := "a\nb\nc\n"
 	localBody := "A\nb\nc\n"
 	remoteBody := "a\nb\nC\n"
-	plan := buildPullEntryPlan("file",
-		map[string]stateEntry{"/page/index.tsx": {Hash: testHash(t, baseBody)}},
+	plan := BuildPullEntryPlan("file",
+		map[string]StateEntry{"/page/index.tsx": {Hash: testHash(t, baseBody)}},
 		true,
-		map[string]snapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, localBody), Body: localBody}},
-		map[string]snapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, remoteBody), Body: remoteBody}},
+		map[string]SnapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, localBody), Body: localBody}},
+		map[string]SnapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, remoteBody), Body: remoteBody}},
 		func(hash string) (string, bool) { return baseBody, true },
 	)
 
@@ -276,28 +276,28 @@ func TestBuildPullEntryPlanWritesMarkersOnOverlap(t *testing.T) {
 	baseBody := "a\nb\nc\n"
 	localBody := "a\nLOCAL\nc\n"
 	remoteBody := "a\nREMOTE\nc\n"
-	plan := buildPullEntryPlan("file",
-		map[string]stateEntry{"/page/index.tsx": {Hash: testHash(t, baseBody)}},
+	plan := BuildPullEntryPlan("file",
+		map[string]StateEntry{"/page/index.tsx": {Hash: testHash(t, baseBody)}},
 		true,
-		map[string]snapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, localBody), Body: localBody}},
-		map[string]snapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, remoteBody), Body: remoteBody}},
+		map[string]SnapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, localBody), Body: localBody}},
+		map[string]SnapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, remoteBody), Body: remoteBody}},
 		func(hash string) (string, bool) { return baseBody, true },
 	)
 
 	if len(plan.Conflicts) != 0 || len(plan.CleanMerges) != 0 {
 		t.Fatalf("got plan %+v, want one conflict write", plan)
 	}
-	if len(plan.ConflictWrites) != 1 || !hasConflictMarkers(plan.ConflictWrites[0].Body) {
+	if len(plan.ConflictWrites) != 1 || !HasConflictMarkers(plan.ConflictWrites[0].Body) {
 		t.Fatalf("got conflict writes %+v, want marker body", plan.ConflictWrites)
 	}
 }
 
 func TestBuildPullEntryPlanFallsBackWithoutBaseContent(t *testing.T) {
-	plan := buildPullEntryPlan("file",
-		map[string]stateEntry{"/page/index.tsx": {Hash: testHash(t, "old\n")}},
+	plan := BuildPullEntryPlan("file",
+		map[string]StateEntry{"/page/index.tsx": {Hash: testHash(t, "old\n")}},
 		true,
-		map[string]snapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"}},
-		map[string]snapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"}},
+		map[string]SnapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"}},
+		map[string]SnapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"}},
 		func(hash string) (string, bool) { return "", false },
 	)
 
@@ -308,16 +308,16 @@ func TestBuildPullEntryPlanFallsBackWithoutBaseContent(t *testing.T) {
 
 func TestBuildSyncPlanBlocksConflictMarkers(t *testing.T) {
 	baseBody := "old\n"
-	markerBody := conflictMarkerLocal + "\nlocal\n" + conflictMarkerSep + "\nremote\n" + conflictMarkerRemote + "\n"
-	state := workspaceState{Files: map[string]stateEntry{
+	markerBody := ConflictMarkerLocal + "\nlocal\n" + ConflictMarkerSep + "\nremote\n" + ConflictMarkerRemote + "\n"
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/page/index.tsx": {Hash: testHash(t, baseBody)},
 	}}
 
-	plan := buildSyncPlan(state, true,
-		map[string]snapshotEntry{
+	plan := BuildSyncPlan(state, true,
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, markerBody), Body: markerBody},
 		},
-		map[string]snapshotEntry{
+		map[string]SnapshotEntry{
 			"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, baseBody), Body: baseBody},
 		},
 		false,
@@ -333,11 +333,11 @@ func TestBuildSyncPlanBlocksConflictMarkers(t *testing.T) {
 
 func TestMergeStateSnapshotKeepsBaseForUnresolvedConflict(t *testing.T) {
 	baseHash := testHash(t, "old\n")
-	next := mergeStateSnapshot(
-		map[string]stateEntry{"/page/index.tsx": {Hash: baseHash}},
+	next := MergeStateSnapshot(
+		map[string]StateEntry{"/page/index.tsx": {Hash: baseHash}},
 		true,
-		map[string]snapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"}},
-		map[string]snapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"}},
+		map[string]SnapshotEntry{"/page/index.tsx": {Path: "/page/index.tsx", Hash: testHash(t, "local\n"), Body: "local\n"}},
+		map[string]SnapshotEntry{"/page/index.tsx": {ID: "remote-id", Path: "/page/index.tsx", Hash: testHash(t, "remote\n"), Body: "remote\n"}},
 	)
 
 	if next["/page/index.tsx"].Hash != baseHash {
@@ -349,22 +349,22 @@ func TestSaveWorkspaceStateWritesAndGCsBaseObjects(t *testing.T) {
 	root := t.TempDir()
 	body := "hello\n"
 	hash := testHash(t, body)
-	files := map[string]snapshotEntry{
+	files := map[string]SnapshotEntry{
 		"/page/index.tsx": {Path: "/page/index.tsx", Hash: hash, Body: body},
 	}
-	if err := saveWorkspaceState(root, "project/site", files); err != nil {
+	if err := SaveWorkspaceState(root, "project/site", "", files); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := readBaseObject(root, hash)
+	got, ok := ReadBaseObject(root, hash)
 	if !ok || got != body {
 		t.Fatalf("readBaseObject = %q ok=%v, want stored body", got, ok)
 	}
 
-	if err := saveWorkspaceState(root, "project/site", map[string]snapshotEntry{}); err != nil {
+	if err := SaveWorkspaceState(root, "project/site", "", map[string]SnapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := readBaseObject(root, hash); ok {
+	if _, ok := ReadBaseObject(root, hash); ok {
 		t.Fatal("base object survived GC after being dereferenced")
 	}
 }
@@ -373,11 +373,11 @@ func TestBackupOverwrittenLocalFilesSkipsUnmodified(t *testing.T) {
 	root := t.TempDir()
 	baseBody := "base\n"
 	modifiedBody := "modified\n"
-	state := workspaceState{Files: map[string]stateEntry{
+	state := WorkspaceState{Files: map[string]StateEntry{
 		"/clean.txt": {Hash: testHash(t, baseBody)},
 		"/dirty.txt": {Hash: testHash(t, baseBody)},
 	}}
-	localFiles := map[string]snapshotEntry{
+	localFiles := map[string]SnapshotEntry{
 		"/clean.txt": {Path: "/clean.txt", Hash: testHash(t, baseBody), Body: baseBody},
 		"/dirty.txt": {Path: "/dirty.txt", Hash: testHash(t, modifiedBody), Body: modifiedBody},
 	}
@@ -386,7 +386,7 @@ func TestBackupOverwrittenLocalFilesSkipsUnmodified(t *testing.T) {
 		"/dirty.txt": "new remote\n",
 	}
 
-	backupDir, err := backupOverwrittenLocalFiles(root, state, true, localFiles, incoming)
+	backupDir, err := BackupOverwrittenLocalFiles(root, state, true, localFiles, incoming)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestBackupOverwrittenLocalFilesSkipsUnmodified(t *testing.T) {
 
 func testHash(t *testing.T, body string) string {
 	t.Helper()
-	hash, err := qetagHash([]byte(body))
+	hash, err := QetagHash([]byte(body))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"path/filepath"
 	"strings"
 

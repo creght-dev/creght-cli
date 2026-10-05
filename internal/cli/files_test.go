@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
 func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {

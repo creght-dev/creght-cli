@@ -107,7 +107,7 @@ func TestHasConflictMarkersIgnoresPartialMarkers(t *testing.T) {
 
 func TestRunResolveFromSubdirectoryUsesCwdRelativePath(t *testing.T) {
 	dir := t.TempDir()
-	if err := saveWorkspaceState(dir, "project/site", map[string]snapshotEntry{}); err != nil {
+	if err := saveWorkspaceState(dir, "project/site", currentAPIHost().Host, map[string]snapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
 	merged, _ := merge3("a\nb\nc\n", "a\nLOCAL\nc\n", "a\nREMOTE\nc\n")
@@ -138,7 +138,7 @@ func TestRunResolveFromSubdirectoryUsesCwdRelativePath(t *testing.T) {
 
 func TestRunResolveOursRewritesFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := saveWorkspaceState(dir, "project/site", map[string]snapshotEntry{}); err != nil {
+	if err := saveWorkspaceState(dir, "project/site", currentAPIHost().Host, map[string]snapshotEntry{}); err != nil {
 		t.Fatal(err)
 	}
 	merged, _ := merge3("a\nb\nc\n", "a\nLOCAL\nc\n", "a\nREMOTE\nc\n")

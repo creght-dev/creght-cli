@@ -1,18 +1,16 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"bytes"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/br41n10/qetag"
 )
 
 func runUpload(ctx context.Context, args []string) error {
@@ -136,15 +134,6 @@ func detectMIMEType(path string, body []byte) string {
 		}
 	}
 	return http.DetectContentType(body)
-}
-
-func qetagHash(body []byte) (string, error) {
-	qe := qetag.New()
-	_, err := qe.Write(body)
-	if err != nil {
-		return "", fmt.Errorf("qetag hash: %w", err)
-	}
-	return qe.Etag(), nil
 }
 
 func putPresignedObject(ctx context.Context, rawURL string, mimeType string, cacheControl string, body []byte) error {

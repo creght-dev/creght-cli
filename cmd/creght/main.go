@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bysir/creght-cli/internal/cli"
 	"context"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/cli"
 	"os"
 )
 

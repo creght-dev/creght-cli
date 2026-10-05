@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"net/url"
 	"os"
 	"strings"

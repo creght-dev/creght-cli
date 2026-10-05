@@ -1,11 +1,11 @@
-package cli
+package workspace
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
 func TestCollectLocalSnapshotActions(t *testing.T) {
@@ -23,7 +23,7 @@ func TestCollectLocalSnapshotActions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unchangedHash, err := qetagHash(unchangedBody)
+	unchangedHash, err := QetagHash(unchangedBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestCollectLocalSnapshotActions(t *testing.T) {
 
 	got := map[string]string{}
 	for _, action := range actions {
-		got[action.remotePath] = action.action.Action
+		got[action.RemotePath] = action.Action.Action
 	}
 
 	want := map[string]string{
@@ -97,7 +97,7 @@ func TestCollectLocalSnapshotActionsIncludesBackendFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sameHash, err := qetagHash(sameBody)
+	sameHash, err := QetagHash(sameBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestCollectLocalSnapshotActionsIncludesBackendFiles(t *testing.T) {
 
 	got := map[string]string{}
 	for _, action := range actions {
-		got[action.remotePath] = action.action.Action
+		got[action.RemotePath] = action.Action.Action
 	}
 	want := map[string]string{
 		"/backend/func/changed.ts":         "file_update",

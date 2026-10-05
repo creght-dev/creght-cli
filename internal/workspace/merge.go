@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"fmt"
@@ -6,15 +6,15 @@ import (
 )
 
 const (
-	conflictMarkerLocal  = "<<<<<<< local"
-	conflictMarkerSep    = "======="
-	conflictMarkerRemote = ">>>>>>> remote"
+	ConflictMarkerLocal  = "<<<<<<< local"
+	ConflictMarkerSep    = "======="
+	ConflictMarkerRemote = ">>>>>>> remote"
 )
 
 // merge3 performs a line-level three-way merge of local and remote against
 // their common base. Non-overlapping changes merge cleanly; overlapping
 // changes produce git-style conflict markers and clean=false.
-func merge3(base string, local string, remote string) (merged string, clean bool) {
+func Merge3(base string, local string, remote string) (merged string, clean bool) {
 	baseLines := strings.Split(base, "\n")
 	localLines := strings.Split(local, "\n")
 	remoteLines := strings.Split(remote, "\n")
@@ -39,11 +39,11 @@ func merge3(base string, local string, remote string) (merged string, clean bool
 			out = append(out, localChunk...)
 		default:
 			clean = false
-			out = append(out, conflictMarkerLocal)
+			out = append(out, ConflictMarkerLocal)
 			out = append(out, localChunk...)
-			out = append(out, conflictMarkerSep)
+			out = append(out, ConflictMarkerSep)
 			out = append(out, remoteChunk...)
-			out = append(out, conflictMarkerRemote)
+			out = append(out, ConflictMarkerRemote)
 		}
 	}
 
@@ -146,7 +146,7 @@ func parseConflictBlocks(lines []string) []conflictBlock {
 		switch {
 		case strings.HasPrefix(line, "<<<<<<< "):
 			cur = conflictBlock{start: i, sep: -1}
-		case line == conflictMarkerSep && cur.start >= 0 && cur.sep < 0:
+		case line == ConflictMarkerSep && cur.start >= 0 && cur.sep < 0:
 			cur.sep = i
 		case strings.HasPrefix(line, ">>>>>>> ") && cur.start >= 0 && cur.sep >= 0:
 			cur.end = i
@@ -157,13 +157,13 @@ func parseConflictBlocks(lines []string) []conflictBlock {
 	return blocks
 }
 
-func hasConflictMarkers(body string) bool {
+func HasConflictMarkers(body string) bool {
 	return len(parseConflictBlocks(strings.Split(body, "\n"))) > 0
 }
 
 // resolveConflictBody rewrites a marker-laden body keeping the local side
 // (keepLocal) or the remote side of every conflict block.
-func resolveConflictBody(body string, keepLocal bool) (string, int, error) {
+func ResolveConflictBody(body string, keepLocal bool) (string, int, error) {
 	lines := strings.Split(body, "\n")
 	blocks := parseConflictBlocks(lines)
 	if len(blocks) == 0 {

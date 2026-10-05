@@ -1,10 +1,10 @@
-package cli
+package workspace
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,12 +39,12 @@ type snapshotInfo struct {
 }
 
 // snapshotKeptRootEntries survive a snapshot pull untouched.
-var snapshotKeptRootEntries = map[string]bool{".git": true, stateDirName: true}
+var snapshotKeptRootEntries = map[string]bool{".git": true, StateDirName: true}
 
 // refuseSnapshotWorkspace stops a command that would treat a snapshot directory
 // as an editable workspace.
-func refuseSnapshotWorkspace(root string, command string) error {
-	state, hasState, err := loadWorkspaceState(root)
+func RefuseSnapshotWorkspace(root string, command string) error {
+	state, hasState, err := LoadWorkspaceState(root)
 	if err != nil || !hasState || state.Snapshot == nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func refuseSnapshotWorkspace(root string, command string) error {
 	)
 }
 
-func parseSnapshotVersionNo(raw string) (int64, error) {
+func ParseSnapshotVersionNo(raw string) (int64, error) {
 	versionNo, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	if err != nil || versionNo <= 0 {
 		return 0, fmt.Errorf("invalid --version_no %q; expected a positive <version_no> from creght version list", raw)
@@ -62,21 +62,31 @@ func parseSnapshotVersionNo(raw string) (int64, error) {
 	return versionNo, nil
 }
 
+// SnapshotResult reports what a version pull wrote.
+type SnapshotResult struct {
+	Dir       string
+	SiteRef   string
+	VersionNo int64
+	// VersionID and Note are labels from the publish state; zero/empty when it
+	// could not be read.
+	VersionID int64
+	Note      string
+	// Files is how many files the version has; Removed is how many files the
+	// directory held that the version does not, and were deleted.
+	Files   int
+	Removed int
+}
+
 // pullVersionSnapshot writes version versionNo of the site into root.
-func pullVersionSnapshot(ctx context.Context, projectID string, realSiteID string, root string, versionNo int64) error {
+func PullVersionSnapshot(ctx context.Context, client *creght.Client, projectID string, realSiteID string, root string, apiHost string, versionNo int64) (SnapshotResult, error) {
 	siteRef := projectID + "/" + realSiteID
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("resolve dir: %w", err)
+		return SnapshotResult{}, fmt.Errorf("resolve dir: %w", err)
 	}
 	previous, err := checkSnapshotTarget(root)
 	if err != nil {
-		return err
-	}
-
-	client, _, err := clientFromConfig()
-	if err != nil {
-		return err
+		return SnapshotResult{}, err
 	}
 
 	info := snapshotInfo{VersionNo: versionNo}
@@ -94,66 +104,61 @@ func pullVersionSnapshot(ctx context.Context, projectID string, realSiteID strin
 
 	list, err := client.GetFileListAtVersion(ctx, projectID, realSiteID, strconv.FormatInt(versionNo, 10))
 	if err != nil {
-		return err
+		return SnapshotResult{}, err
 	}
 	files := snapshotFiles(list.List)
 	if len(files) == 0 {
 		// The platform answers an unknown version with an empty list.
-		return fmt.Errorf("version %d of %s has no files; check the number with creght version list --site_id=%s", versionNo, siteRef, siteRef)
+		return SnapshotResult{}, fmt.Errorf("version %d of %s has no files; check the number with creght version list --site_id=%s", versionNo, siteRef, siteRef)
 	}
 
 	deleted, err := writeSnapshotFiles(root, files)
 	if err != nil {
-		return err
+		return SnapshotResult{}, err
 	}
-	if err := saveSnapshotState(root, siteRef, previous.APIHost, info); err != nil {
-		return err
+	if err := saveSnapshotState(root, siteRef, recordHost(previous.APIHost, apiHost), info); err != nil {
+		return SnapshotResult{}, err
 	}
 
-	label := fmt.Sprintf("version %d", versionNo)
-	if info.VersionID > 0 {
-		label = versionLabel(versionNo, info.VersionID)
-	}
-	fmt.Printf("Pulled %s of %s into %s: %d file(s)", label, siteRef, root, len(files))
-	if deleted > 0 {
-		fmt.Printf(", removed %d file(s) not in this version", deleted)
-	}
-	fmt.Println()
-	if info.Note != "" {
-		fmt.Printf("note: %s\n", info.Note)
-	}
-	fmt.Println("This is a read-only snapshot: push is disabled here. Pull another version with --version_no to switch.")
-	return nil
+	return SnapshotResult{
+		Dir:       root,
+		SiteRef:   siteRef,
+		VersionNo: versionNo,
+		VersionID: info.VersionID,
+		Note:      info.Note,
+		Files:     len(files),
+		Removed:   deleted,
+	}, nil
 }
 
 // checkSnapshotTarget accepts a missing or empty directory, or one that already
 // holds a snapshot. An editable workspace or a directory with unrelated files is
 // refused: a snapshot pull deletes whatever the version does not contain.
-func checkSnapshotTarget(root string) (workspaceState, error) {
-	state, hasState, err := loadWorkspaceState(root)
+func checkSnapshotTarget(root string) (WorkspaceState, error) {
+	state, hasState, err := LoadWorkspaceState(root)
 	if err != nil {
-		return workspaceState{}, err
+		return WorkspaceState{}, err
 	}
 	if hasState {
 		if state.Snapshot == nil {
-			return workspaceState{}, fmt.Errorf("%s is an editable workspace of %s; pull a version into a separate --dir so the workspace is not overwritten", root, state.SiteID)
+			return WorkspaceState{}, fmt.Errorf("%s is an editable workspace of %s; pull a version into a separate --dir so the workspace is not overwritten", root, state.SiteID)
 		}
 		return state, nil
 	}
 
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
-		return workspaceState{}, nil
+		return WorkspaceState{}, nil
 	}
 	if err != nil {
-		return workspaceState{}, fmt.Errorf("read %s: %w", root, err)
+		return WorkspaceState{}, fmt.Errorf("read %s: %w", root, err)
 	}
 	for _, entry := range entries {
 		if !snapshotKeptRootEntries[entry.Name()] {
-			return workspaceState{}, fmt.Errorf("%s is not empty and is not a creght version snapshot; pull a version into a new or empty directory, since the pull deletes files the version does not contain", root)
+			return WorkspaceState{}, fmt.Errorf("%s is not empty and is not a creght version snapshot; pull a version into a new or empty directory, since the pull deletes files the version does not contain", root)
 		}
 	}
-	return workspaceState{}, nil
+	return WorkspaceState{}, nil
 }
 
 // snapshotFiles keys a version's files by site path. Platform-generated
@@ -164,7 +169,7 @@ func snapshotFiles(list []creght.File) map[string]string {
 		if file.IsDir || file.Readonly {
 			continue
 		}
-		files[normalizeSitePath(file.Path)] = file.Body
+		files[NormalizeSitePath(file.Path)] = file.Body
 	}
 	return files
 }
@@ -196,7 +201,7 @@ func writeSnapshotFiles(root string, files map[string]string) (int, error) {
 			dirs = append(dirs, path)
 			return nil
 		}
-		remotePath, err := localPathToRemote(root, path)
+		remotePath, err := LocalPathToRemote(root, path)
 		if err != nil {
 			return err
 		}
@@ -226,7 +231,7 @@ func writeSnapshotFiles(root string, files map[string]string) (int, error) {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
-		localPath, err := remotePathToLocal(root, p)
+		localPath, err := RemotePathToLocal(root, p)
 		if err != nil {
 			return 0, err
 		}
@@ -240,23 +245,23 @@ func writeSnapshotFiles(root string, files map[string]string) (int, error) {
 	return len(stale), nil
 }
 
-func saveSnapshotState(root string, siteRef string, recordedAPIHost string, info snapshotInfo) error {
-	state := workspaceState{
+func saveSnapshotState(root string, siteRef string, apiHost string, info snapshotInfo) error {
+	state := WorkspaceState{
 		SiteID:    siteRef,
-		APIHost:   keepOrRecordAPIHost(recordedAPIHost),
+		APIHost:   apiHost,
 		UpdatedAt: time.Now().Format(time.RFC3339Nano),
 		// No base: a snapshot is never synced, so nothing may merge against it.
-		Files:    map[string]stateEntry{},
+		Files:    map[string]StateEntry{},
 		Snapshot: &info,
 	}
-	if err := os.MkdirAll(filepath.Dir(statePath(root)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(StatePath(root)), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(StatePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
 	return nil

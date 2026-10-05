@@ -1,10 +1,11 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/pkg/sitesync"
 	"io"
 	"os"
 	"strconv"
@@ -157,14 +158,14 @@ func runVersionList(ctx context.Context, args []string) error {
 		return err
 	}
 
-	client, _, err := clientFromConfig()
+	syncClient, cfg, err := syncClientFromConfig()
 	if err != nil {
 		return err
 	}
 
-	state, err := client.GetSitePublishState(ctx, projectID, realSiteID)
+	state, err := syncClient.Versions(ctx, sitesync.Site{ProjectID: projectID, SiteID: realSiteID})
 	if err != nil {
-		return err
+		return withAuthHint(err, cfg)
 	}
 	if *jsonOut {
 		return printJSON(state)
@@ -358,31 +359,31 @@ func requirePushedWorkspace(ctx context.Context, client *creght.Client, projectI
 		return nil
 	}
 
-	syncer, err := NewSyncer(client, projectID, realSiteID, dir)
+	syncer, err := NewSyncer(client, projectID, realSiteID, dir, currentAPIHost().Host, os.Stdout)
 	if err != nil {
 		return err
 	}
 	// allowDelete so local deletions surface as pending changes rather than
 	// being silently skipped; nothing is applied here.
-	planCtx, err := syncer.buildPlanContext(ctx, true)
+	plan, err := syncer.Plan(ctx, true)
 	if err != nil {
 		return err
 	}
-	plan := planCtx.plan
-	if !plan.hasChanges() && !plan.hasConflicts() {
+	changes, conflicts := plan.LocalChanges(), plan.Conflicts()
+	if len(changes) == 0 && len(conflicts) == 0 {
 		return nil
 	}
 
-	for _, action := range plan.FileActions {
-		fmt.Printf("%s %s\n", siteActionLabel(action.action.Action), action.remotePath)
+	for _, change := range changes {
+		fmt.Printf("%s %s\n", siteActionLabel(change.Action), change.Path)
 	}
-	for _, conflict := range plan.Conflicts {
+	for _, conflict := range conflicts {
 		fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
 	}
 
 	return fmt.Errorf(
 		"%s not pushed yet and would be missing from this version; run creght push first, or pass --allow-dirty to snapshot the remote site as it is",
-		changeCount(len(plan.FileActions)+len(plan.Conflicts)),
+		changeCount(len(changes)+len(conflicts)),
 	)
 }
 

@@ -16,6 +16,10 @@ import (
 type Client struct {
 	baseURL string
 	token   string
+	// tokenFunc, when set, is asked for the token on every request instead of
+	// using token, so a caller that refreshes its OAuth token never hands the
+	// client a stale one. See NewClientWithTokenFunc.
+	tokenFunc func(ctx context.Context) (string, error)
 	// authHint is appended to a 401, naming where the rejected token came from
 	// and what fixes it. See SetAuthHint.
 	authHint string
@@ -58,6 +62,29 @@ func NewClient(baseURL string, token string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// NewClientWithTokenFunc is NewClient for a caller that owns the token's
+// lifetime: tokenFunc is called before every request.
+func NewClientWithTokenFunc(baseURL string, tokenFunc func(ctx context.Context) (string, error)) *Client {
+	c := NewClient(baseURL, "")
+	c.tokenFunc = tokenFunc
+	return c
+}
+
+func (c *Client) setAuth(ctx context.Context, req *http.Request) error {
+	token := c.token
+	if c.tokenFunc != nil {
+		t, err := c.tokenFunc(ctx)
+		if err != nil {
+			return fmt.Errorf("get token: %w", err)
+		}
+		token = strings.TrimSpace(t)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return nil
 }
 
 type APIError struct {
@@ -128,8 +155,8 @@ func (c *Client) do(ctx context.Context, method string, path string, query url.V
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if err := c.setAuth(ctx, req); err != nil {
+		return err
 	}
 
 	resp, err := c.http.Do(req)
@@ -191,8 +218,8 @@ func (c *Client) doRaw(ctx context.Context, method string, path string, query ur
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if err := c.setAuth(ctx, req); err != nil {
+		return nil, 0, err
 	}
 
 	resp, err := c.http.Do(req)

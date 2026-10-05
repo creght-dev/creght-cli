@@ -769,6 +769,40 @@ Use a test project/site while validating the CLI. Do not run `push --force`
 against production content unless the local directory is intended to be the
 source of truth.
 
+## Go Package
+
+The sync commands are also a Go package, for programs that pull and push site
+code themselves instead of running the CLI:
+
+```bash
+go get github.com/creght-dev/creght-cli@latest
+```
+
+```go
+import "github.com/creght-dev/creght-cli/pkg/sitesync"
+
+c, err := sitesync.New(sitesync.Options{
+	Host:  "https://creght.cn",
+	Token: func(ctx context.Context) (string, error) { return accessToken(ctx) },
+	Log:   os.Stderr, // the lines creght prints; nil discards them
+})
+site, _ := sitesync.ParseSite("<project_id>/<site_id>")
+
+res, err := c.Pull(ctx, "./site", site, sitesync.PullOptions{})            // creght pull
+diff, err := c.Diff(ctx, "./site", sitesync.DiffOptions{Delete: true})     // creght diff --json --delete
+pushed, err := c.Push(ctx, "./site", sitesync.PushOptions{Delete: true})   // creght push --delete
+n, err := sitesync.Resolve("./site", "page/Index.tsx", sitesync.Theirs)    // creght resolve --theirs
+state, err := c.Versions(ctx, site)                                        // creght version list --json
+snap, err := c.Pull(ctx, "./tpl", site, sitesync.PullOptions{VersionNo: 3}) // creght pull --version_no=3
+```
+
+The package reads and writes the same workspace format as the CLI, so the two
+can take turns on one directory. It never starts a process and never touches the
+CLI's `config.json`: the token function is called before every request, so a
+caller that refreshes its own OAuth token always sends the current one. A 401
+matches `sitesync.ErrUnauthorized`. See the package documentation for every
+option and result field.
+
 ## Commands
 
 Creght CLI is a local bridge for Creght site code. It can authenticate with
@@ -861,3 +895,7 @@ git remote add github git@github.com:creght-dev/creght-cli.git
 git push github main
 git push github v0.1.0
 ```
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -4,7 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
+
+	"github.com/creght-dev/creght-cli/pkg/sitesync"
 )
 
 // runResolve lists files containing conflict markers left by creght pull, or
@@ -47,55 +48,35 @@ func runResolve(_ context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	localPath, err := remotePathToLocal(root, remotePath)
+	side := sitesync.Theirs
+	if *ours {
+		side = sitesync.Ours
+	}
+	count, err := sitesync.Resolve(root, remotePath, side)
 	if err != nil {
 		return err
 	}
-	body, err := os.ReadFile(localPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", remotePath, err)
-	}
-	resolved, count, err := resolveConflictBody(string(body), *ours)
-	if err != nil {
-		return fmt.Errorf("%s: %w", remotePath, err)
-	}
-	if err := os.WriteFile(localPath, []byte(resolved), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", remotePath, err)
-	}
 
-	side := "local"
+	kept := "local"
 	if *theirs {
-		side = "remote"
+		kept = "remote"
 	}
-	fmt.Printf("Resolved %d conflict(s) in %s (kept %s side)\n", count, remotePath, side)
+	fmt.Printf("Resolved %d conflict(s) in %s (kept %s side)\n", count, remotePath, kept)
 	return nil
 }
 
 func listConflictedFiles(root string) error {
-	found := 0
-	err := walkWorkspaceFiles(root, func(path string) error {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if !isUTF8FileBody(body) || !hasConflictMarkers(string(body)) {
-			return nil
-		}
-		remotePath, err := localPathToRemote(root, path)
-		if err != nil {
-			return err
-		}
-		found++
-		fmt.Printf("conflict %s\n", remotePath)
-		return nil
-	})
+	found, err := sitesync.Conflicts(root)
 	if err != nil {
 		return err
 	}
-	if found == 0 {
+	for _, remotePath := range found {
+		fmt.Printf("conflict %s\n", remotePath)
+	}
+	if len(found) == 0 {
 		fmt.Println("No conflict markers found")
 	} else {
-		fmt.Printf("%d file(s) with conflict markers; run creght resolve <path> --ours|--theirs or edit them by hand, then push\n", found)
+		fmt.Printf("%d file(s) with conflict markers; run creght resolve <path> --ours|--theirs or edit them by hand, then push\n", len(found))
 	}
 	return nil
 }

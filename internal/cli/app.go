@@ -1,11 +1,12 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/pkg/sitesync"
 	"io"
 	"net/url"
 	"os"
@@ -433,6 +434,7 @@ func runPull(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	site := sitesync.Site{ProjectID: projectID, SiteID: realSiteID}
 
 	if len(positionals) > 1 {
 		return fmt.Errorf("pull accepts at most one <path> argument")
@@ -445,7 +447,16 @@ func runPull(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return pullVersionSnapshot(ctx, projectID, realSiteID, *dir, no)
+		syncClient, cfg, err := syncClientFromConfig()
+		if err != nil {
+			return err
+		}
+		res, err := syncClient.Pull(ctx, *dir, site, sitesync.PullOptions{VersionNo: no})
+		if err != nil {
+			return withAuthHint(err, cfg)
+		}
+		printSnapshotPull(site, res)
+		return nil
 	}
 	if err := refuseSnapshotWorkspace(*dir, "pull without --version_no"); err != nil {
 		return err
@@ -454,75 +465,32 @@ func runPull(ctx context.Context, args []string) error {
 		return pullOneFile(ctx, projectID, realSiteID, *dir, positionals[0], *force)
 	}
 
-	client, cfg, err := clientFromConfig()
+	syncClient, cfg, err := syncClientFromConfig()
 	if err != nil {
 		return err
 	}
+	res, err := syncClient.Pull(ctx, *dir, site, sitesync.PullOptions{Force: *force})
+	if err != nil {
+		return withAuthHint(err, cfg)
+	}
 
-	files, err := client.GetFileList(ctx, projectID, realSiteID)
+	client, _, err := clientFromConfig()
 	if err != nil {
 		return err
 	}
-
-	remoteSnap, err := remoteFileSnapshotForWorkspace(*dir, files.List)
-	if err != nil {
-		return err
-	}
-	var outcome pullOutcome
-	if *force {
-		state, hasState, err := loadWorkspaceState(*dir)
-		if err != nil {
-			return err
-		}
-		ignore, err := loadCreghtIgnore(*dir)
-		if err != nil {
-			return err
-		}
-		state.Files = filterIgnoredState(ignore, state.Files)
-		localFiles, err := localFileSnapshot(*dir)
-		if err != nil {
-			return err
-		}
-		incoming := map[string]string{}
-		for path, entry := range remoteSnap {
-			incoming[path] = entry.Body
-		}
-		outcome.backupDir, err = backupOverwrittenLocalFiles(*dir, state, hasState, localFiles, incoming)
-		if err != nil {
-			return err
-		}
-		if err := writeRemoteFilesToWorkspace(*dir, files.List); err != nil {
-			return err
-		}
-		if err := saveWorkspaceState(*dir, projectID+"/"+realSiteID, remoteSnap); err != nil {
-			return err
-		}
-		outcome.changed = len(remoteSnap)
-	} else {
-		outcome, err = safePullWorkspace(*dir, projectID+"/"+realSiteID, remoteSnap)
-		if err != nil {
-			return err
-		}
-	}
-
 	editorURL := siteEditorURL(defaultWebHost(cfg.APIHost), projectID, realSiteID)
-	createdAgents, err := ensurePulledAgentsFile(*dir, nil)
-	if err != nil {
-		return err
-	}
-
 	previewURL, _ := previewURL(ctx, client, realSiteID)
-	for _, path := range outcome.merged {
+	for _, path := range res.Merged {
 		fmt.Printf("merged %s\n", path)
 	}
-	for _, path := range outcome.conflicted {
+	for _, path := range res.Conflicted {
 		fmt.Printf("conflict %s: wrote conflict markers\n", path)
 	}
-	if outcome.backupDir != "" {
-		fmt.Printf("Backed up overwritten local files to %s\n", outcome.backupDir)
+	if res.BackupDir != "" {
+		fmt.Printf("Backed up overwritten local files to %s\n", res.BackupDir)
 	}
-	fmt.Printf("Pulled %d changes into %s\n", outcome.changed, *dir)
-	if createdAgents {
+	fmt.Printf("Pulled %d changes into %s\n", res.Changed, *dir)
+	if res.AgentsFileCreated {
 		fmt.Printf("Generated AGENTS.md for Creght agent context\n")
 	}
 	fmt.Printf("Editor: %s\n", editorURL)
@@ -530,115 +498,27 @@ func runPull(ctx context.Context, args []string) error {
 		fmt.Printf("Preview: %s\n", previewURL)
 	}
 
-	if len(outcome.conflicted) > 0 {
-		return fmt.Errorf("pulled with %d conflicted file(s); edit the conflict markers or run creght resolve, then push", len(outcome.conflicted))
+	if len(res.Conflicted) > 0 {
+		return fmt.Errorf("pulled with %d conflicted file(s); edit the conflict markers or run creght resolve, then push", len(res.Conflicted))
 	}
 	return nil
 }
 
-// pullOutcome summarizes what a pull did, for reporting.
-type pullOutcome struct {
-	changed    int
-	merged     []string // both sides changed, auto-merged cleanly
-	conflicted []string // both sides changed, conflict markers written
-	backupDir  string   // where overwritten local work was saved, if any
-}
-
-func safePullWorkspace(root string, siteID string, remoteFiles map[string]snapshotEntry) (pullOutcome, error) {
-	var outcome pullOutcome
-	ignore, err := loadCreghtIgnore(root)
-	if err != nil {
-		return outcome, err
+func printSnapshotPull(site sitesync.Site, res sitesync.PullResult) {
+	snap := res.Snapshot
+	label := fmt.Sprintf("version %d", snap.VersionNo)
+	if snap.VersionID > 0 {
+		label = versionLabel(snap.VersionNo, snap.VersionID)
 	}
-	remoteFiles = filterIgnoredSnapshot(ignore, remoteFiles)
-	state, hasState, err := loadWorkspaceState(root)
-	if err != nil {
-		return outcome, err
+	fmt.Printf("Pulled %s of %s into %s: %d file(s)", label, site, res.Dir, snap.Files)
+	if snap.Removed > 0 {
+		fmt.Printf(", removed %d file(s) not in this version", snap.Removed)
 	}
-	state.Files = filterIgnoredState(ignore, state.Files)
-	if hasState && strings.TrimSpace(state.SiteID) != "" && state.SiteID != siteID {
-		return outcome, fmt.Errorf("workspace state belongs to %s, not %s", state.SiteID, siteID)
+	fmt.Println()
+	if snap.Note != "" {
+		fmt.Printf("note: %s\n", snap.Note)
 	}
-
-	localFiles, err := localFileSnapshot(root)
-	if err != nil {
-		return outcome, err
-	}
-
-	filePlan := buildPullEntryPlan("file", state.Files, hasState, localFiles, remoteFiles, func(hash string) (string, bool) {
-		return readBaseObject(root, hash)
-	})
-	if len(filePlan.Conflicts) > 0 {
-		for _, conflict := range filePlan.Conflicts {
-			fmt.Printf("conflict %s %s: %s\n", conflict.Kind, conflict.Path, conflict.Reason)
-		}
-		return outcome, fmt.Errorf("pull has conflicts; resolve local changes first, or use --force to overwrite local files")
-	}
-
-	incoming := map[string]string{}
-	for _, entry := range filePlan.CleanMerges {
-		incoming[entry.Path] = entry.Body
-	}
-	for _, entry := range filePlan.ConflictWrites {
-		incoming[entry.Path] = entry.Body
-	}
-	outcome.backupDir, err = backupOverwrittenLocalFiles(root, state, hasState, localFiles, incoming)
-	if err != nil {
-		return outcome, err
-	}
-
-	for _, entry := range filePlan.Writes {
-		if err := writePulledFile(root, entry); err != nil {
-			return outcome, err
-		}
-	}
-	for _, entry := range filePlan.CleanMerges {
-		if err := writePulledFile(root, entry); err != nil {
-			return outcome, err
-		}
-		outcome.merged = append(outcome.merged, entry.Path)
-	}
-	for _, entry := range filePlan.ConflictWrites {
-		if err := writePulledFile(root, entry); err != nil {
-			return outcome, err
-		}
-		outcome.conflicted = append(outcome.conflicted, entry.Path)
-	}
-	for _, path := range filePlan.Deletes {
-		if err := deletePulledFile(root, path); err != nil {
-			return outcome, err
-		}
-	}
-	if err := saveWorkspaceState(root, siteID, remoteFiles); err != nil {
-		return outcome, err
-	}
-	outcome.changed = len(filePlan.Writes) + len(filePlan.CleanMerges) + len(filePlan.ConflictWrites) + len(filePlan.Deletes)
-	return outcome, nil
-}
-
-func writePulledFile(root string, entry snapshotEntry) error {
-	localPath, err := remotePathToLocal(root, entry.Path)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
-		return fmt.Errorf("create parent dir for %s: %w", entry.Path, err)
-	}
-	if err := os.WriteFile(localPath, []byte(entry.Body), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", entry.Path, err)
-	}
-	return nil
-}
-
-func deletePulledFile(root string, remotePath string) error {
-	localPath, err := remotePathToLocal(root, remotePath)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete %s: %w", remotePath, err)
-	}
-	return nil
+	fmt.Println("This is a read-only snapshot: push is disabled here. Pull another version with --version_no to switch.")
 }
 
 func siteEditorURL(webHost string, projectID string, siteID string) string {
@@ -682,29 +562,25 @@ func runPush(ctx context.Context, args []string) error {
 		return pushOneFile(ctx, projectID, realSiteID, *dir, positionals[0], *force)
 	}
 
-	client, _, err := clientFromConfig()
+	syncClient, cfg, err := syncClientFromConfig()
 	if err != nil {
 		return err
 	}
+	if _, err := syncClient.Push(ctx, *dir, sitesync.PushOptions{Delete: *allowDelete, Force: *force, SkipConflicts: *skipConflicts}); err != nil {
+		return withAuthHint(err, cfg)
+	}
 
-	syncer, err := NewSyncer(client, projectID, realSiteID, *dir)
+	absDir, err := filepath.Abs(*dir)
 	if err != nil {
-		return err
+		absDir = *dir
 	}
-
-	if *force {
-		if err := syncer.Push(ctx); err != nil {
-			return err
-		}
-	} else if err := syncer.PushSafe(ctx, *allowDelete, *skipConflicts); err != nil {
-		return err
-	}
-
-	fmt.Printf("Pushed %s -> %s/%s\n", syncer.dir, projectID, realSiteID)
+	fmt.Printf("Pushed %s -> %s/%s\n", absDir, projectID, realSiteID)
 	// The push is already done, so a preview host that cannot be resolved is a
 	// missing line, not a failed command.
-	if preview, err := previewURL(ctx, client, realSiteID); err == nil && preview != "" {
-		fmt.Printf("Preview: %s\n", preview)
+	if client, _, err := clientFromConfig(); err == nil {
+		if preview, err := previewURL(ctx, client, realSiteID); err == nil && preview != "" {
+			fmt.Printf("Preview: %s\n", preview)
+		}
 	}
 	return nil
 }
@@ -745,26 +621,27 @@ func runDiff(ctx context.Context, args []string) error {
 		return diffOneFile(ctx, projectID, realSiteID, *dir, positionals[0])
 	}
 
-	client, _, err := clientFromConfig()
+	client, cfg, err := clientFromConfig()
 	if err != nil {
 		return err
 	}
 
-	syncer, err := NewSyncer(client, projectID, realSiteID, *dir)
+	syncer, err := NewSyncer(client, projectID, realSiteID, *dir, cfg.APIHost, os.Stdout)
 	if err != nil {
 		return err
 	}
 
-	planCtx, err := syncer.buildPlanContext(ctx, *allowDelete)
+	// The same plan pkg/sitesync's Diff returns; the text form also needs the
+	// skipped deletes the JSON leaves out, so it is read here directly.
+	plan, err := syncer.Plan(ctx, *allowDelete)
 	if err != nil {
 		return err
 	}
-	plan := planCtx.plan
 	if *jsonOut {
-		return printPlanJSON(plan, conflictJSONDetails(*dir, planCtx, syncer.currentRemoteFileSnapshot()))
+		return printJSON(plan.Result())
 	}
-	printSyncPlan(plan, true)
-	if plan.hasConflicts() {
+	plan.Print(os.Stdout)
+	if plan.HasConflicts() {
 		return fmt.Errorf("diff has conflicts; run creght pull to merge remote changes, then resolve any conflict markers before pushing")
 	}
 	return nil

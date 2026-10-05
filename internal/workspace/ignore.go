@@ -1,9 +1,9 @@
-package cli
+package workspace
 
 import (
 	"bufio"
-	"bysir/creght-cli/internal/creght"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const creghtIgnoreFileName = ".creghtignore"
+const CreghtIgnoreFileName = ".creghtignore"
 
 type creghtIgnoreRule struct {
 	negated bool
@@ -22,13 +22,13 @@ type creghtIgnore struct {
 	rules []creghtIgnoreRule
 }
 
-func loadCreghtIgnore(root string) (*creghtIgnore, error) {
-	body, err := os.ReadFile(filepath.Join(root, creghtIgnoreFileName))
+func LoadCreghtIgnore(root string) (*creghtIgnore, error) {
+	body, err := os.ReadFile(filepath.Join(root, CreghtIgnoreFileName))
 	if os.IsNotExist(err) {
 		return &creghtIgnore{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", creghtIgnoreFileName, err)
+		return nil, fmt.Errorf("read %s: %w", CreghtIgnoreFileName, err)
 	}
 
 	ignore := &creghtIgnore{}
@@ -55,12 +55,12 @@ func loadCreghtIgnore(root string) (*creghtIgnore, error) {
 
 		pattern, err := compileCreghtIgnorePattern(line)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s line %d: %w", creghtIgnoreFileName, lineNumber, err)
+			return nil, fmt.Errorf("parse %s line %d: %w", CreghtIgnoreFileName, lineNumber, err)
 		}
 		ignore.rules = append(ignore.rules, creghtIgnoreRule{negated: negated, pattern: pattern})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", creghtIgnoreFileName, err)
+		return nil, fmt.Errorf("read %s: %w", CreghtIgnoreFileName, err)
 	}
 	return ignore, nil
 }
@@ -117,9 +117,9 @@ func compileCreghtIgnorePattern(pattern string) (*regexp.Regexp, error) {
 	return regexp.Compile(out.String())
 }
 
-func (i *creghtIgnore) matches(remotePath string) bool {
+func (i *creghtIgnore) Matches(remotePath string) bool {
 	path := strings.TrimPrefix(filepath.ToSlash(remotePath), "/")
-	if path == creghtIgnoreFileName {
+	if path == CreghtIgnoreFileName {
 		return true
 	}
 
@@ -140,17 +140,17 @@ func (i *creghtIgnore) matches(remotePath string) bool {
 // copy live and out of the CLI's reach. Reporting the paths is the difference
 // between "stopped syncing" and "still on your site"; dropping them silently
 // is what makes the ordering a trap. creght rm deletes one regardless.
-func ignoredRemotePaths(ignore *creghtIgnore, files []creght.File) []string {
+func IgnoredRemotePaths(ignore *creghtIgnore, files []creght.File) []string {
 	var out []string
 	for _, file := range files {
 		if file.IsDir {
 			continue
 		}
-		if strings.TrimPrefix(filepath.ToSlash(file.Path), "/") == creghtIgnoreFileName {
+		if strings.TrimPrefix(filepath.ToSlash(file.Path), "/") == CreghtIgnoreFileName {
 			// Never synced by design, so its absence is not a surprise.
 			continue
 		}
-		if ignore.matches(file.Path) {
+		if ignore.Matches(file.Path) {
 			out = append(out, file.Path)
 		}
 	}
@@ -158,10 +158,10 @@ func ignoredRemotePaths(ignore *creghtIgnore, files []creght.File) []string {
 	return out
 }
 
-func filterIgnoredSnapshot(ignore *creghtIgnore, files map[string]snapshotEntry) map[string]snapshotEntry {
-	filtered := make(map[string]snapshotEntry, len(files))
+func FilterIgnoredSnapshot(ignore *creghtIgnore, files map[string]SnapshotEntry) map[string]SnapshotEntry {
+	filtered := make(map[string]SnapshotEntry, len(files))
 	for path, entry := range files {
-		if ignore.matches(path) {
+		if ignore.Matches(path) {
 			continue
 		}
 		filtered[path] = entry
@@ -169,10 +169,10 @@ func filterIgnoredSnapshot(ignore *creghtIgnore, files map[string]snapshotEntry)
 	return filtered
 }
 
-func filterIgnoredState(ignore *creghtIgnore, files map[string]stateEntry) map[string]stateEntry {
-	filtered := make(map[string]stateEntry, len(files))
+func FilterIgnoredState(ignore *creghtIgnore, files map[string]StateEntry) map[string]StateEntry {
+	filtered := make(map[string]StateEntry, len(files))
 	for path, entry := range files {
-		if ignore.matches(path) {
+		if ignore.Matches(path) {
 			continue
 		}
 		filtered[path] = entry
@@ -180,10 +180,10 @@ func filterIgnoredState(ignore *creghtIgnore, files map[string]stateEntry) map[s
 	return filtered
 }
 
-func remoteFileSnapshotForWorkspace(root string, files []creght.File) (map[string]snapshotEntry, error) {
-	ignore, err := loadCreghtIgnore(root)
+func RemoteFileSnapshotForWorkspace(root string, files []creght.File) (map[string]SnapshotEntry, error) {
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return nil, err
 	}
-	return filterIgnoredSnapshot(ignore, remoteFileSnapshot(files)), nil
+	return FilterIgnoredSnapshot(ignore, RemoteFileSnapshot(files)), nil
 }

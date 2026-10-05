@@ -107,17 +107,3 @@ func discoverWorkspaceAPIHost() (string, string, bool) {
 
 	return host, root, true
 }
-
-// keepOrRecordAPIHost stamps a workspace with the host it syncs against the
-// first time it is written, then leaves it alone.
-//
-// Recording it is what lets later commands in that directory drop the
-// CREGHT_API_HOST prefix. Never rewriting it is what stops a one-off override
-// from silently repointing the workspace at another deployment.
-func keepOrRecordAPIHost(recorded string) string {
-	if host := canonicalAPIHost(recorded); host != "" {
-		return host
-	}
-
-	return currentAPIHost().Host
-}

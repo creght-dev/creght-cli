@@ -28,6 +28,27 @@ It supports:
 
 The CLI does not render sites locally. Rendering, CMS, assets, and realtime preview are handled by the Cregh backend and web app.
 
+## Layout
+
+- `internal/workspace`: the sync engine — workspace format (`.creght/state.json`,
+  base objects under `.creght/base/`, `.creghtignore`), three-way merge and
+  conflict markers, the push plan, pull, push, version snapshots. The only
+  implementation; never reads the CLI's `config.json` and never prints to
+  stdout: the API host to stamp and an `io.Writer` for progress are passed in.
+- `pkg/sitesync`: the public Go API over it (`Pull`, `Diff`, `Push`,
+  `Resolve`, `Conflicts`, `Versions`), for programs that sync site code without
+  running the CLI. The caller supplies the host and a token function. It is a
+  public, versioned API: change its signatures only with a minor version bump
+  and a note in the release, and keep `DiffResult` identical to
+  `creght diff --json`.
+- `internal/cli`: the commands. `pull`, `push`, `resolve` and `version list`
+  run through `pkg/sitesync`; `diff` and the single-file commands use
+  `internal/workspace` directly (`workspace_aliases.go` keeps the old
+  lowercase names). `internal/creght` is the HTTP client.
+
+The module path is `github.com/creght-dev/creght-cli`. The repository is
+licensed under Apache-2.0 (`LICENSE`, `NOTICE`).
+
 ## Backend
 
 The CLI talks to the Creght backend over HTTP; it has no code dependency on it.
@@ -112,7 +133,7 @@ versions into their copy.
 
 `pull --version_no` writes a snapshot, not a workspace: `.creght/state.json`
 carries `snapshot` and no base, push/diff/rm/plain pull refuse to run there
-(`refuseSnapshotWorkspace` in `internal/cli/snapshot.go`), and each pull makes
+(`RefuseSnapshotWorkspace` in `internal/workspace/snapshot.go`), and each pull makes
 the directory match the version exactly, deleting everything else except `.git`
 and `.creght` at its root. The flag is `--version_no`, not `--version`: the root
 command treats a bare `--version` anywhere as "print the CLI version".

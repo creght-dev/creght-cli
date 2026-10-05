@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
 func testPublishState() creght.SitePublishState {
@@ -123,7 +123,7 @@ func writeTestWorkspace(t *testing.T, siteRef string, remote []creght.File, loca
 			t.Fatal(err)
 		}
 	}
-	if err := saveWorkspaceState(dir, siteRef, remoteFileSnapshot(remote)); err != nil {
+	if err := saveWorkspaceState(dir, siteRef, currentAPIHost().Host, remoteFileSnapshot(remote)); err != nil {
 		t.Fatalf("saveWorkspaceState: %v", err)
 	}
 

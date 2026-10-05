@@ -1,14 +1,15 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"encoding/json"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestPullVersionSnapshotMatchesEachVersionExactly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tpl")
 
 	captureStdout(t, func() {
-		if err := pullVersionSnapshot(context.Background(), "p1", "s1", dir, 1); err != nil {
+		if err := pullSnapshotForTest("p1", "s1", dir, 1); err != nil {
 			t.Fatalf("pull v1: %v", err)
 		}
 	})
@@ -125,7 +126,7 @@ func TestPullVersionSnapshotMatchesEachVersionExactly(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := pullVersionSnapshot(context.Background(), "p1", "s1", dir, 2); err != nil {
+		if err := pullSnapshotForTest("p1", "s1", dir, 2); err != nil {
 			t.Fatalf("pull v2: %v", err)
 		}
 	})
@@ -159,7 +160,7 @@ func TestPullVersionSnapshotRejectsUnknownVersion(t *testing.T) {
 	versionServer(t, map[string][]creght.File{})
 	dir := filepath.Join(t.TempDir(), "tpl")
 
-	err := pullVersionSnapshot(context.Background(), "p1", "s1", dir, 9)
+	err := pullSnapshotForTest("p1", "s1", dir, 9)
 	if err == nil || !strings.Contains(err.Error(), "has no files") {
 		t.Fatalf("err = %v, want an unknown-version error", err)
 	}
@@ -172,7 +173,7 @@ func TestPullVersionSnapshotRefusesWorkspacesAndUnrelatedDirs(t *testing.T) {
 	versionServer(t, map[string][]creght.File{"1": {{Path: "/page/Index.tsx", Body: "v1"}}})
 
 	workspace := writeTestWorkspace(t, "p1/s1", []creght.File{testRemoteFile(t, "id", "/page/Index.tsx", "live")}, nil)
-	err := pullVersionSnapshot(context.Background(), "p1", "s1", workspace, 1)
+	err := pullSnapshotForTest("p1", "s1", workspace, 1)
 	if err == nil || !strings.Contains(err.Error(), "editable workspace") {
 		t.Fatalf("err = %v, want refusal to overwrite a workspace", err)
 	}
@@ -184,7 +185,7 @@ func TestPullVersionSnapshotRefusesWorkspacesAndUnrelatedDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(unrelated, "notes.md"), []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = pullVersionSnapshot(context.Background(), "p1", "s1", unrelated, 1)
+	err = pullSnapshotForTest("p1", "s1", unrelated, 1)
 	if err == nil || !strings.Contains(err.Error(), "not empty") {
 		t.Fatalf("err = %v, want refusal for a non-empty directory", err)
 	}
@@ -195,7 +196,7 @@ func TestPullVersionSnapshotRefusesWorkspacesAndUnrelatedDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureStdout(t, func() {
-		if err := pullVersionSnapshot(context.Background(), "p1", "s1", gitOnly, 1); err != nil {
+		if err := pullSnapshotForTest("p1", "s1", gitOnly, 1); err != nil {
 			t.Fatalf("pull into a fresh git dir: %v", err)
 		}
 	})
@@ -205,7 +206,7 @@ func TestSnapshotDirectoryRefusesPushDiffAndPlainPull(t *testing.T) {
 	versionServer(t, map[string][]creght.File{"1": {{Path: "/page/Index.tsx", Body: "v1"}}})
 	dir := filepath.Join(t.TempDir(), "tpl")
 	captureStdout(t, func() {
-		if err := pullVersionSnapshot(context.Background(), "p1", "s1", dir, 1); err != nil {
+		if err := pullSnapshotForTest("p1", "s1", dir, 1); err != nil {
 			t.Fatalf("pull: %v", err)
 		}
 	})
@@ -228,12 +229,12 @@ func TestSnapshotDirectoryRefusesPushDiffAndPlainPull(t *testing.T) {
 	}
 
 	// The syncer refuses too, which covers version create's dirty check.
-	syncer, err := NewSyncer(creght.NewClient("http://unused", ""), "p1", "s1", dir)
+	syncer, err := NewSyncer(creght.NewClient("http://unused", ""), "p1", "s1", dir, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := syncer.requireWorkspace(); err == nil || !strings.Contains(err.Error(), "read-only snapshot") {
-		t.Fatalf("requireWorkspace = %v, want a read-only refusal", err)
+	if _, err := syncer.Plan(context.Background(), true); err == nil || !strings.Contains(err.Error(), "read-only snapshot") {
+		t.Fatalf("Plan = %v, want a read-only refusal", err)
 	}
 }
 
@@ -284,4 +285,14 @@ func TestPrintVersionListReadOnlyView(t *testing.T) {
 	if strings.Contains(out.String(), "version create") {
 		t.Fatalf("read-only view suggests version create, which a non-member cannot run: %q", out.String())
 	}
+}
+
+// pullSnapshotForTest runs creght pull --version_no, the path a snapshot pull
+// takes through the CLI.
+func pullSnapshotForTest(projectID string, siteID string, dir string, versionNo int64) error {
+	return runPull(context.Background(), []string{
+		"--site_id=" + projectID + "/" + siteID,
+		"--dir=" + dir,
+		"--version_no=" + strconv.FormatInt(versionNo, 10),
+	})
 }

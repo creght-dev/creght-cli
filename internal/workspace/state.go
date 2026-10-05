@@ -1,9 +1,9 @@
-package cli
+package workspace
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"encoding/json"
 	"fmt"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,29 +11,29 @@ import (
 	"time"
 )
 
-const stateDirName = ".creght"
+const StateDirName = ".creght"
 const stateFileName = "state.json"
-const baseDirName = "base"
+const BaseDirName = "base"
 
-type workspaceState struct {
+type WorkspaceState struct {
 	SiteID string `json:"site_id"`
 	// APIHost is the Creght deployment this workspace was pulled from. It is
 	// what lets later commands here resolve the host without CREGHT_API_HOST;
 	// see resolveAPIHost. Empty in workspaces pulled by older CLI versions.
 	APIHost   string                `json:"api_host,omitempty"`
 	UpdatedAt string                `json:"updated_at"`
-	Files     map[string]stateEntry `json:"files"`
+	Files     map[string]StateEntry `json:"files"`
 	// Snapshot is set when the directory holds one site version pulled by
 	// pull --version_no rather than an editable workspace; see snapshot.go.
 	Snapshot *snapshotInfo `json:"snapshot,omitempty"`
 }
 
-type stateEntry struct {
+type StateEntry struct {
 	Hash     string `json:"hash"`
 	Readonly bool   `json:"readonly,omitempty"`
 }
 
-type snapshotEntry struct {
+type SnapshotEntry struct {
 	ID       string
 	Path     string
 	Hash     string
@@ -43,7 +43,7 @@ type snapshotEntry struct {
 
 type syncPlan struct {
 	FileActions       []localFileAction
-	Conflicts         []planConflict
+	Conflicts         []PlanConflict
 	SkippedDeletes    []string
 	RemoteOnlyUpdates []string
 	NoBaseRemoteDiffs []string
@@ -53,30 +53,30 @@ type syncPlan struct {
 	IgnoredRemote []string
 }
 
-type planConflict struct {
+type PlanConflict struct {
 	Kind   string
 	Path   string
 	Reason string
 }
 
 type pullEntryPlan struct {
-	Writes []snapshotEntry
+	Writes []SnapshotEntry
 	// CleanMerges are files changed on both sides whose edits do not overlap;
 	// Body holds the auto-merged content.
-	CleanMerges []snapshotEntry
+	CleanMerges []SnapshotEntry
 	// ConflictWrites are files changed on both sides with overlapping edits;
 	// Body holds the content with conflict markers.
-	ConflictWrites []snapshotEntry
+	ConflictWrites []SnapshotEntry
 	Deletes        []string
-	Conflicts      []planConflict
+	Conflicts      []PlanConflict
 }
 
-func statePath(root string) string {
-	return filepath.Join(root, stateDirName, stateFileName)
+func StatePath(root string) string {
+	return filepath.Join(root, StateDirName, stateFileName)
 }
 
 func baseObjectPath(root string, hash string) string {
-	return filepath.Join(root, stateDirName, baseDirName, hash)
+	return filepath.Join(root, StateDirName, BaseDirName, hash)
 }
 
 // writeBaseObjects stores file bodies under .creght/base/<hash> so later
@@ -84,7 +84,7 @@ func baseObjectPath(root string, hash string) string {
 // whose Body does not match their Hash (e.g. hash-only entries carried over
 // from a previous state) are skipped; their blob is either already stored or
 // simply unavailable.
-func writeBaseObjects(root string, files map[string]snapshotEntry) error {
+func writeBaseObjects(root string, files map[string]SnapshotEntry) error {
 	for _, file := range files {
 		if file.Hash == "" {
 			continue
@@ -93,7 +93,7 @@ func writeBaseObjects(root string, files map[string]snapshotEntry) error {
 		if _, err := os.Stat(path); err == nil {
 			continue
 		}
-		hash, err := qetagHash([]byte(file.Body))
+		hash, err := QetagHash([]byte(file.Body))
 		if err != nil || hash != file.Hash {
 			continue
 		}
@@ -110,7 +110,7 @@ func writeBaseObjects(root string, files map[string]snapshotEntry) error {
 // readBaseObject returns the stored base content for a hash, if present.
 // Workspaces pulled by older CLI versions have no base objects; callers fall
 // back to hash-only conflict detection.
-func readBaseObject(root string, hash string) (string, bool) {
+func ReadBaseObject(root string, hash string) (string, bool) {
 	if hash == "" {
 		return "", false
 	}
@@ -122,12 +122,12 @@ func readBaseObject(root string, hash string) (string, bool) {
 }
 
 // gcBaseObjects removes base objects no longer referenced by the state.
-func gcBaseObjects(root string, files map[string]stateEntry) {
+func gcBaseObjects(root string, files map[string]StateEntry) {
 	referenced := map[string]struct{}{}
 	for _, entry := range files {
 		referenced[entry.Hash] = struct{}{}
 	}
-	entries, err := os.ReadDir(filepath.Join(root, stateDirName, baseDirName))
+	entries, err := os.ReadDir(filepath.Join(root, StateDirName, BaseDirName))
 	if err != nil {
 		return
 	}
@@ -141,20 +141,20 @@ func gcBaseObjects(root string, files map[string]stateEntry) {
 	}
 }
 
-func loadWorkspaceState(root string) (workspaceState, bool, error) {
-	body, err := os.ReadFile(statePath(root))
+func LoadWorkspaceState(root string) (WorkspaceState, bool, error) {
+	body, err := os.ReadFile(StatePath(root))
 	if os.IsNotExist(err) {
-		return workspaceState{}, false, nil
+		return WorkspaceState{}, false, nil
 	}
 	if err != nil {
-		return workspaceState{}, false, fmt.Errorf("read state: %w", err)
+		return WorkspaceState{}, false, fmt.Errorf("read state: %w", err)
 	}
-	var state workspaceState
+	var state WorkspaceState
 	if err := json.Unmarshal(body, &state); err != nil {
-		return workspaceState{}, false, fmt.Errorf("parse state: %w", err)
+		return WorkspaceState{}, false, fmt.Errorf("parse state: %w", err)
 	}
 	if state.Files == nil {
-		state.Files = map[string]stateEntry{}
+		state.Files = map[string]StateEntry{}
 	}
 	return state, true, nil
 }
@@ -162,8 +162,8 @@ func loadWorkspaceState(root string) (workspaceState, bool, error) {
 // resolveSiteWorkspace resolves a command's workspace directory and site ref.
 // When searchParents is true (the caller did not explicitly pass --dir), it
 // walks upward so commands also work from a subdirectory of a pulled workspace.
-func resolveSiteWorkspace(dir string, siteID string, searchParents bool, requireWorkspace bool) (string, string, error) {
-	root, state, hasState, err := findWorkspaceState(dir, searchParents)
+func ResolveSiteWorkspace(dir string, siteID string, searchParents bool, requireWorkspace bool) (string, string, error) {
+	root, state, hasState, err := FindWorkspaceState(dir, searchParents)
 	if err != nil {
 		return "", "", err
 	}
@@ -192,59 +192,59 @@ func resolveSiteWorkspace(dir string, siteID string, searchParents bool, require
 	return root, requestedSiteID, nil
 }
 
-func findWorkspaceState(start string, searchParents bool) (string, workspaceState, bool, error) {
+func FindWorkspaceState(start string, searchParents bool) (string, WorkspaceState, bool, error) {
 	root, err := filepath.Abs(start)
 	if err != nil {
-		return "", workspaceState{}, false, fmt.Errorf("resolve workspace dir: %w", err)
+		return "", WorkspaceState{}, false, fmt.Errorf("resolve workspace dir: %w", err)
 	}
 
 	for {
-		state, hasState, err := loadWorkspaceState(root)
+		state, hasState, err := LoadWorkspaceState(root)
 		if err != nil {
-			return "", workspaceState{}, false, err
+			return "", WorkspaceState{}, false, err
 		}
 		if hasState {
 			return root, state, true, nil
 		}
 		if !searchParents {
-			return root, workspaceState{}, false, nil
+			return root, WorkspaceState{}, false, nil
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
-			return root, workspaceState{}, false, nil
+			return root, WorkspaceState{}, false, nil
 		}
 		root = parent
 	}
 }
 
-func saveWorkspaceState(root string, siteID string, files map[string]snapshotEntry) error {
-	ignore, err := loadCreghtIgnore(root)
+func SaveWorkspaceState(root string, siteID string, apiHost string, files map[string]SnapshotEntry) error {
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return err
 	}
-	files = filterIgnoredSnapshot(ignore, files)
-	previous, _, err := loadWorkspaceState(root)
+	files = FilterIgnoredSnapshot(ignore, files)
+	previous, _, err := LoadWorkspaceState(root)
 	if err != nil {
 		return err
 	}
-	state := workspaceState{
+	state := WorkspaceState{
 		SiteID:    siteID,
-		APIHost:   keepOrRecordAPIHost(previous.APIHost),
+		APIHost:   recordHost(previous.APIHost, apiHost),
 		UpdatedAt: time.Now().Format(time.RFC3339Nano),
-		Files:     map[string]stateEntry{},
+		Files:     map[string]StateEntry{},
 	}
 	for path, file := range files {
-		state.Files[path] = stateEntry{Hash: file.Hash, Readonly: file.Readonly}
+		state.Files[path] = StateEntry{Hash: file.Hash, Readonly: file.Readonly}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(statePath(root)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(StatePath(root)), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(StatePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
 	if err := writeBaseObjects(root, files); err != nil {
@@ -257,8 +257,8 @@ func saveWorkspaceState(root string, siteID string, files map[string]snapshotEnt
 // dropStateFileEntry removes one file's base entry after its remote copy is
 // deleted, so the next plan does not see a base with no local file and offer
 // to delete a file that is already gone.
-func dropStateFileEntry(root string, remotePath string) error {
-	state, hasState, err := loadWorkspaceState(root)
+func DropStateFileEntry(root string, remotePath string) error {
+	state, hasState, err := LoadWorkspaceState(root)
 	if err != nil || !hasState || state.Files == nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func dropStateFileEntry(root string, remotePath string) error {
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(StatePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
 	gcBaseObjects(root, state.Files)
@@ -280,50 +280,50 @@ func dropStateFileEntry(root string, remotePath string) error {
 
 // putStateFileEntry updates the base state for a single file (used by
 // single-file pull/push) without rewriting the whole snapshot.
-func putStateFileEntry(root string, siteID string, entry snapshotEntry) error {
-	state, hasState, err := loadWorkspaceState(root)
+func PutStateFileEntry(root string, siteID string, apiHost string, entry SnapshotEntry) error {
+	state, hasState, err := LoadWorkspaceState(root)
 	if err != nil {
 		return err
 	}
 	if !hasState || state.Files == nil {
-		state.Files = map[string]stateEntry{}
+		state.Files = map[string]StateEntry{}
 	}
-	ignore, err := loadCreghtIgnore(root)
+	ignore, err := LoadCreghtIgnore(root)
 	if err != nil {
 		return err
 	}
-	state.Files = filterIgnoredState(ignore, state.Files)
+	state.Files = FilterIgnoredState(ignore, state.Files)
 	if strings.TrimSpace(state.SiteID) == "" {
 		state.SiteID = siteID
 	}
-	state.APIHost = keepOrRecordAPIHost(state.APIHost)
-	state.Files[entry.Path] = stateEntry{Hash: entry.Hash, Readonly: entry.Readonly}
+	state.APIHost = recordHost(state.APIHost, apiHost)
+	state.Files[entry.Path] = StateEntry{Hash: entry.Hash, Readonly: entry.Readonly}
 	state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
 
-	if err := os.MkdirAll(filepath.Dir(statePath(root)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(StatePath(root)), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(statePath(root), append(body, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(StatePath(root), append(body, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
-	return writeBaseObjects(root, map[string]snapshotEntry{entry.Path: entry})
+	return writeBaseObjects(root, map[string]SnapshotEntry{entry.Path: entry})
 }
 
-func remoteFileSnapshot(files []creght.File) map[string]snapshotEntry {
-	out := map[string]snapshotEntry{}
+func RemoteFileSnapshot(files []creght.File) map[string]SnapshotEntry {
+	out := map[string]SnapshotEntry{}
 	for _, file := range files {
 		if file.IsDir {
 			continue
 		}
 		hash := strings.TrimSpace(file.Hash)
 		if hash == "" {
-			hash, _ = qetagHash([]byte(file.Body))
+			hash, _ = QetagHash([]byte(file.Body))
 		}
-		out[file.Path] = snapshotEntry{
+		out[file.Path] = SnapshotEntry{
 			ID:       file.ID,
 			Path:     file.Path,
 			Hash:     hash,
@@ -334,25 +334,25 @@ func remoteFileSnapshot(files []creght.File) map[string]snapshotEntry {
 	return out
 }
 
-func localFileSnapshot(root string) (map[string]snapshotEntry, error) {
-	out := map[string]snapshotEntry{}
-	err := walkWorkspaceFiles(root, func(path string) error {
+func LocalFileSnapshot(root string) (map[string]SnapshotEntry, error) {
+	out := map[string]SnapshotEntry{}
+	err := WalkWorkspaceFiles(root, func(path string) error {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		if !isUTF8FileBody(body) {
+		if !IsUTF8FileBody(body) {
 			return nil
 		}
-		remotePath, err := localPathToRemote(root, path)
+		remotePath, err := LocalPathToRemote(root, path)
 		if err != nil {
 			return err
 		}
-		hash, err := qetagHash(body)
+		hash, err := QetagHash(body)
 		if err != nil {
 			return err
 		}
-		out[remotePath] = snapshotEntry{Path: remotePath, Hash: hash, Body: string(body)}
+		out[remotePath] = SnapshotEntry{Path: remotePath, Hash: hash, Body: string(body)}
 		return nil
 	})
 	if err != nil {
@@ -361,16 +361,16 @@ func localFileSnapshot(root string) (map[string]snapshotEntry, error) {
 	return out, nil
 }
 
-func buildSyncPlan(state workspaceState, hasState bool, localFiles map[string]snapshotEntry, remoteFiles map[string]snapshotEntry, allowDelete bool) syncPlan {
+func BuildSyncPlan(state WorkspaceState, hasState bool, localFiles map[string]SnapshotEntry, remoteFiles map[string]SnapshotEntry, allowDelete bool) syncPlan {
 	var plan syncPlan
 	plan.FileActions, plan.Conflicts, plan.SkippedDeletes, plan.RemoteOnlyUpdates, plan.NoBaseRemoteDiffs = buildFilePlan(state.Files, hasState, localFiles, remoteFiles, allowDelete)
 	sortPlan(&plan)
 	return plan
 }
 
-func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]snapshotEntry, remote map[string]snapshotEntry, allowDelete bool) ([]localFileAction, []planConflict, []string, []string, []string) {
+func buildFilePlan(base map[string]StateEntry, hasState bool, local map[string]SnapshotEntry, remote map[string]SnapshotEntry, allowDelete bool) ([]localFileAction, []PlanConflict, []string, []string, []string) {
 	var actions []localFileAction
-	var conflicts []planConflict
+	var conflicts []PlanConflict
 	var skippedDeletes []string
 	var remoteOnlyUpdates []string
 	var noBaseRemoteDiffs []string
@@ -387,14 +387,14 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 		if !hasState || !baseOK {
 			switch {
 			case localOK && !remoteOK:
-				if hasConflictMarkers(localEntry.Body) {
+				if HasConflictMarkers(localEntry.Body) {
 					conflicts = append(conflicts, markerConflict(path))
 					continue
 				}
-				actions = append(actions, createFileAction(path, localEntry.Body))
+				actions = append(actions, CreateFileAction(path, localEntry.Body))
 			case localOK && remoteOK && localEntry.Hash != remoteEntry.Hash:
 				noBaseRemoteDiffs = append(noBaseRemoteDiffs, path)
-				conflicts = append(conflicts, planConflict{Kind: "file", Path: path, Reason: "no base state for remote file; pull first or use --force (a path just removed from .creghtignore lands here too, since ignoring it dropped its base)"})
+				conflicts = append(conflicts, PlanConflict{Kind: "file", Path: path, Reason: "no base state for remote file; pull first or use --force (a path just removed from .creghtignore lands here too, since ignoring it dropped its base)"})
 			}
 			continue
 		}
@@ -416,19 +416,19 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 		case localChanged && !remoteChanged:
 			if !localOK {
 				if allowDelete {
-					actions = append(actions, deleteFileAction(path))
+					actions = append(actions, DeleteFileAction(path))
 				} else {
 					skippedDeletes = append(skippedDeletes, path)
 				}
-			} else if hasConflictMarkers(localEntry.Body) {
+			} else if HasConflictMarkers(localEntry.Body) {
 				conflicts = append(conflicts, markerConflict(path))
 			} else if remoteOK {
-				actions = append(actions, updateFileAction(remoteEntry, localEntry.Body))
+				actions = append(actions, UpdateFileAction(remoteEntry, localEntry.Body))
 			} else {
-				actions = append(actions, createFileAction(path, localEntry.Body))
+				actions = append(actions, CreateFileAction(path, localEntry.Body))
 			}
 		case localChanged && remoteChanged:
-			conflicts = append(conflicts, planConflict{Kind: "file", Path: path, Reason: "changed both locally and remotely"})
+			conflicts = append(conflicts, PlanConflict{Kind: "file", Path: path, Reason: "changed both locally and remotely"})
 		}
 	}
 	return actions, conflicts, skippedDeletes, remoteOnlyUpdates, noBaseRemoteDiffs
@@ -436,14 +436,14 @@ func buildFilePlan(base map[string]stateEntry, hasState bool, local map[string]s
 
 // markerConflict blocks a file whose local copy still contains conflict
 // markers from a previous pull; pushing those would publish broken code.
-func markerConflict(path string) planConflict {
-	return planConflict{Kind: "file", Path: path, Reason: "contains unresolved conflict markers; edit the file or run creght resolve"}
+func markerConflict(path string) PlanConflict {
+	return PlanConflict{Kind: "file", Path: path, Reason: "contains unresolved conflict markers; edit the file or run creght resolve"}
 }
 
 // buildPullEntryPlan plans a pull. baseBody looks up recorded base content by
 // hash (nil disables merging); files changed on both sides are three-way
 // merged when the base content is available, otherwise reported as conflicts.
-func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, local map[string]snapshotEntry, remote map[string]snapshotEntry, baseBody func(hash string) (string, bool)) pullEntryPlan {
+func BuildPullEntryPlan(kind string, base map[string]StateEntry, hasState bool, local map[string]SnapshotEntry, remote map[string]SnapshotEntry, baseBody func(hash string) (string, bool)) pullEntryPlan {
 	var plan pullEntryPlan
 	for _, path := range unionKeys(base, local, remote) {
 		baseEntry, baseOK := base[path]
@@ -457,7 +457,7 @@ func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, 
 			case remoteOK && !localOK:
 				plan.Writes = append(plan.Writes, remoteEntry)
 			case remoteOK && localOK && localEntry.Hash != remoteEntry.Hash:
-				plan.Conflicts = append(plan.Conflicts, planConflict{Kind: kind, Path: path, Reason: "no base state for local file; move it aside or use pull --force"})
+				plan.Conflicts = append(plan.Conflicts, PlanConflict{Kind: kind, Path: path, Reason: "no base state for local file; move it aside or use pull --force"})
 			}
 			continue
 		}
@@ -484,14 +484,14 @@ func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, 
 		case localChanged && !remoteChanged:
 			continue
 		case localChanged && remoteChanged:
-			if localOK && remoteOK && hasConflictMarkers(localEntry.Body) {
+			if localOK && remoteOK && HasConflictMarkers(localEntry.Body) {
 				plan.Conflicts = append(plan.Conflicts, markerConflict(path))
 				continue
 			}
 			if localOK && remoteOK && baseBody != nil {
 				if baseText, ok := baseBody(baseEntry.Hash); ok {
-					merged, clean := merge3(baseText, localEntry.Body, remoteEntry.Body)
-					entry := snapshotEntry{ID: remoteEntry.ID, Path: path, Hash: remoteEntry.Hash, Body: merged, Readonly: remoteEntry.Readonly}
+					merged, clean := Merge3(baseText, localEntry.Body, remoteEntry.Body)
+					entry := SnapshotEntry{ID: remoteEntry.ID, Path: path, Hash: remoteEntry.Hash, Body: merged, Readonly: remoteEntry.Readonly}
 					if clean {
 						plan.CleanMerges = append(plan.CleanMerges, entry)
 					} else {
@@ -500,7 +500,7 @@ func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, 
 					continue
 				}
 			}
-			plan.Conflicts = append(plan.Conflicts, planConflict{Kind: kind, Path: path, Reason: "changed both locally and remotely"})
+			plan.Conflicts = append(plan.Conflicts, PlanConflict{Kind: kind, Path: path, Reason: "changed both locally and remotely"})
 		}
 	}
 	sort.Slice(plan.Writes, func(i, j int) bool { return plan.Writes[i].Path < plan.Writes[j].Path })
@@ -511,7 +511,7 @@ func buildPullEntryPlan(kind string, base map[string]stateEntry, hasState bool, 
 	return plan
 }
 
-func unionKeys(base map[string]stateEntry, local map[string]snapshotEntry, remote map[string]snapshotEntry) []string {
+func unionKeys(base map[string]StateEntry, local map[string]SnapshotEntry, remote map[string]SnapshotEntry) []string {
 	seen := map[string]struct{}{}
 	for key := range base {
 		seen[key] = struct{}{}
@@ -530,10 +530,10 @@ func unionKeys(base map[string]stateEntry, local map[string]snapshotEntry, remot
 	return keys
 }
 
-func createFileAction(path string, body string) localFileAction {
+func CreateFileAction(path string, body string) localFileAction {
 	return localFileAction{
-		remotePath: path,
-		action: creght.SiteActionChange{
+		RemotePath: path,
+		Action: creght.SiteActionChange{
 			Action: "file_create",
 			File: creght.SiteActionFileSpec{
 				Path: creght.StringPtr(path),
@@ -543,10 +543,10 @@ func createFileAction(path string, body string) localFileAction {
 	}
 }
 
-func updateFileAction(remote snapshotEntry, body string) localFileAction {
+func UpdateFileAction(remote SnapshotEntry, body string) localFileAction {
 	return localFileAction{
-		remotePath: remote.Path,
-		action: creght.SiteActionChange{
+		RemotePath: remote.Path,
+		Action: creght.SiteActionChange{
 			Action: "file_update",
 			File: creght.SiteActionFileSpec{
 				ID:   remote.ID,
@@ -557,7 +557,7 @@ func updateFileAction(remote snapshotEntry, body string) localFileAction {
 }
 
 func sortPlan(plan *syncPlan) {
-	sort.Slice(plan.FileActions, func(i, j int) bool { return plan.FileActions[i].remotePath < plan.FileActions[j].remotePath })
+	sort.Slice(plan.FileActions, func(i, j int) bool { return plan.FileActions[i].RemotePath < plan.FileActions[j].RemotePath })
 	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Path < plan.Conflicts[j].Path })
 	sort.Strings(plan.SkippedDeletes)
 	sort.Strings(plan.RemoteOnlyUpdates)
@@ -572,8 +572,8 @@ func (p syncPlan) hasConflicts() bool {
 	return len(p.Conflicts) > 0
 }
 
-func mergeStateSnapshot(base map[string]stateEntry, hasState bool, local map[string]snapshotEntry, remote map[string]snapshotEntry) map[string]snapshotEntry {
-	next := map[string]snapshotEntry{}
+func MergeStateSnapshot(base map[string]StateEntry, hasState bool, local map[string]SnapshotEntry, remote map[string]SnapshotEntry) map[string]SnapshotEntry {
+	next := map[string]SnapshotEntry{}
 	if !hasState {
 		for path, localEntry := range local {
 			if remoteEntry, ok := remote[path]; ok {
@@ -591,17 +591,17 @@ func mergeStateSnapshot(base map[string]stateEntry, hasState bool, local map[str
 		remoteEntry, remoteOK := remote[path]
 		switch {
 		case localOK && baseOK && localEntry.Hash == baseEntry.Hash && (!remoteOK || remoteEntry.Hash != baseEntry.Hash):
-			next[path] = snapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
+			next[path] = SnapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
 		case localOK && remoteOK && baseOK && localEntry.Hash != baseEntry.Hash && remoteEntry.Hash != baseEntry.Hash && localEntry.Hash != remoteEntry.Hash:
 			// Unresolved both-sides change (e.g. push --skip-conflicts): keep
 			// the old base so a later pull can still three-way merge.
-			next[path] = snapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
+			next[path] = SnapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
 		case localOK && remoteOK:
 			next[path] = remoteEntry
 		case localOK:
 			next[path] = localEntry
 		case baseOK && remoteOK && remoteEntry.Hash == baseEntry.Hash:
-			next[path] = snapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
+			next[path] = SnapshotEntry{Path: path, Hash: baseEntry.Hash, Readonly: baseEntry.Readonly}
 		}
 	}
 	return next

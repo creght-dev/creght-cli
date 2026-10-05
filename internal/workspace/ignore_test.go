@@ -1,16 +1,16 @@
-package cli
+package workspace
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"bysir/creght-cli/internal/creght"
+	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
 func writeIgnoreTestFile(t *testing.T, root string, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, creghtIgnoreFileName), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, CreghtIgnoreFileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -26,7 +26,7 @@ cache/*
 docs/
 `)
 
-	ignore, err := loadCreghtIgnore(dir)
+	ignore, err := LoadCreghtIgnore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ docs/
 		"/src/index.ts":         false,
 	}
 	for path, want := range tests {
-		if got := ignore.matches(path); got != want {
+		if got := ignore.Matches(path); got != want {
 			t.Errorf("matches(%q) = %v, want %v", path, got, want)
 		}
 	}
@@ -67,8 +67,8 @@ func TestWalkWorkspaceFilesUsesCreghtIgnore(t *testing.T) {
 	}
 
 	var got []string
-	if err := walkWorkspaceFiles(dir, func(path string) error {
-		remotePath, err := localPathToRemote(dir, path)
+	if err := WalkWorkspaceFiles(dir, func(path string) error {
+		remotePath, err := LocalPathToRemote(dir, path)
 		if err == nil {
 			got = append(got, remotePath)
 		}
@@ -99,7 +99,7 @@ func TestIgnoredLegacyFrontendDirectoryDoesNotBlockWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := walkWorkspaceFiles(dir, func(string) error {
+	if err := WalkWorkspaceFiles(dir, func(string) error {
 		t.Fatal("ignored legacy frontend file was walked")
 		return nil
 	}); err != nil {
@@ -111,7 +111,7 @@ func TestEnsurePulledAgentsFileHonorsCreghtIgnore(t *testing.T) {
 	dir := t.TempDir()
 	writeIgnoreTestFile(t, dir, "AGENTS.md\n")
 
-	created, err := ensurePulledAgentsFile(dir, nil)
+	created, err := EnsurePulledAgentsFile(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,12 +134,12 @@ func TestSafePullWorkspacePreservesIgnoredFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remote := remoteFileSnapshot([]creght.File{
+	remote := RemoteFileSnapshot([]creght.File{
 		{Path: "/generated/local.txt", Body: "remote\n"},
 		{Path: "/page/Index.tsx", Body: "page\n"},
 		{Path: "/.creghtignore", Body: "remote config\n"},
 	})
-	outcome, err := safePullWorkspace(dir, "project/site", remote)
+	outcome, err := SafePullWorkspace(dir, "project/site", "", remote, os.Stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestSafePullWorkspacePreservesIgnoredFiles(t *testing.T) {
 	if string(body) != "local\n" {
 		t.Fatalf("ignored file overwritten with %q", body)
 	}
-	state, ok, err := loadWorkspaceState(dir)
+	state, ok, err := LoadWorkspaceState(dir)
 	if err != nil || !ok {
 		t.Fatalf("load state: ok=%v err=%v", ok, err)
 	}
@@ -179,7 +179,7 @@ func TestForcePullWriterPreservesIgnoredFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeRemoteFilesToWorkspace(dir, []creght.File{
+	if err := WriteRemoteFilesToWorkspace(dir, []creght.File{
 		{Path: "/generated/local.txt", Body: "remote\n"},
 		{Path: "/page/Index.tsx", Body: "page\n"},
 	}); err != nil {
@@ -215,10 +215,10 @@ func TestCollectLocalSnapshotActionsPreservesIgnoredRemoteFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range actions {
-		if action.remotePath == "/generated/remote.txt" {
+		if action.RemotePath == "/generated/remote.txt" {
 			t.Fatal("push attempted to delete ignored remote file")
 		}
-		if action.remotePath == "/.creghtignore" {
+		if action.RemotePath == "/.creghtignore" {
 			t.Fatal("push attempted to upload .creghtignore")
 		}
 	}
@@ -227,7 +227,7 @@ func TestCollectLocalSnapshotActionsPreservesIgnoredRemoteFiles(t *testing.T) {
 func TestIgnoredRemotePathsNamesHiddenRemoteFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeIgnoreTestFile(t, dir, "docs/\noutput/*\n")
-	ignore, err := loadCreghtIgnore(dir)
+	ignore, err := LoadCreghtIgnore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestIgnoredRemotePathsNamesHiddenRemoteFiles(t *testing.T) {
 		{Path: "/.creghtignore"},
 		{Path: "/docs", IsDir: true},
 	}
-	got := ignoredRemotePaths(ignore, remote)
+	got := IgnoredRemotePaths(ignore, remote)
 	want := []string{"/docs/a.md", "/docs/sub/b.md", "/output/shot.png"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -254,29 +254,29 @@ func TestIgnoredRemotePathsNamesHiddenRemoteFiles(t *testing.T) {
 
 func TestIgnoredRemotePathsEmptyWithoutRules(t *testing.T) {
 	dir := t.TempDir()
-	ignore, err := loadCreghtIgnore(dir)
+	ignore, err := LoadCreghtIgnore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	remote := []creght.File{{Path: "/page/Index.tsx"}}
-	if got := ignoredRemotePaths(ignore, remote); len(got) != 0 {
+	if got := IgnoredRemotePaths(ignore, remote); len(got) != 0 {
 		t.Fatalf("expected no ignored paths, got %v", got)
 	}
 }
 
 func TestDropStateFileEntryRemovesBaseEntry(t *testing.T) {
 	dir := t.TempDir()
-	files := map[string]snapshotEntry{
+	files := map[string]SnapshotEntry{
 		"/page/Index.tsx": {Path: "/page/Index.tsx", Hash: "h1", Body: "a"},
 		"/docs/a.md":      {Path: "/docs/a.md", Hash: "h2", Body: "b"},
 	}
-	if err := saveWorkspaceState(dir, "pid/sid", files); err != nil {
+	if err := SaveWorkspaceState(dir, "pid/sid", "", files); err != nil {
 		t.Fatal(err)
 	}
-	if err := dropStateFileEntry(dir, "/docs/a.md"); err != nil {
+	if err := DropStateFileEntry(dir, "/docs/a.md"); err != nil {
 		t.Fatal(err)
 	}
-	state, hasState, err := loadWorkspaceState(dir)
+	state, hasState, err := LoadWorkspaceState(dir)
 	if err != nil || !hasState {
 		t.Fatalf("state not readable: %v", err)
 	}

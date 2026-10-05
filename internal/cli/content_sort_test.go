@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"bysir/creght-cli/internal/creght"
 	"context"
 	"encoding/json"
+	"github.com/creght-dev/creght-cli/internal/creght"
 	"net/http"
 	"net/http/httptest"
 	"os"
