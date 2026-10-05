@@ -111,7 +111,7 @@ func TestEnsurePulledAgentsFileHonorsCreghtIgnore(t *testing.T) {
 	dir := t.TempDir()
 	writeIgnoreTestFile(t, dir, "AGENTS.md\n")
 
-	created, err := ensurePulledAgentsFile(dir, nil, "project", "site", "https://example.com")
+	created, err := ensurePulledAgentsFile(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

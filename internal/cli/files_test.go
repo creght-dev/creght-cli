@@ -14,7 +14,7 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 
 	created, err := ensurePulledAgentsFile(dir, []creght.File{
 		{Path: "/page/index.tsx", Body: "export default function Page() { return null }\n"},
-	}, "project-1", "site-1", "https://creght.cn/editor/project/project-1/site/site-1")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,15 +30,19 @@ func TestEnsurePulledAgentsFileCreatesWhenRemoteMissing(t *testing.T) {
 	for _, want := range []string{
 		"This is a Creght project pulled by the Creght CLI.",
 		"https://github.com/creght-dev/skills/blob/main/readme.md",
-		"Project ID: project-1",
-		"Site ID: site-1",
-		"Editor URL: https://creght.cn/editor/project/project-1/site/site-1",
 		".creght/state.json records the site ID",
+		"creght url prints",
 		"do not repeat --site_id or --dir",
 		"creght pull\ncreght diff\ncreght push",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("AGENTS.md missing %q in:\n%s", want, text)
+		}
+	}
+	// 文件会随站点被复制到别的项目，不能带本站的身份信息。
+	for _, banned := range []string{"Project ID", "Site ID", "Editor URL"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("AGENTS.md must not contain site-specific %q:\n%s", banned, text)
 		}
 	}
 }
@@ -88,7 +92,7 @@ func TestEnsurePulledAgentsFileDoesNothingWhenRemoteExists(t *testing.T) {
 
 	created, err := ensurePulledAgentsFile(dir, []creght.File{
 		{Path: "/AGENTS.md", Body: "remote body\n"},
-	}, "project-1", "site-1", "https://creght.cn/editor/project/project-1/site/site-1")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +111,7 @@ func TestEnsurePulledAgentsFileDoesNotOverwriteLocalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := ensurePulledAgentsFile(dir, nil, "project-1", "site-1", "https://creght.cn/editor/project/project-1/site/site-1")
+	created, err := ensurePulledAgentsFile(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

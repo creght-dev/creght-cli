@@ -164,7 +164,11 @@ func writeRemoteFilesToWorkspace(root string, files []creght.File) error {
 	return nil
 }
 
-func ensurePulledAgentsFile(root string, files []creght.File, projectID string, siteID string, editorURL string) (bool, error) {
+// ensurePulledAgentsFile 给本地 agent 生成一份 AGENTS.md，已有（本地或远端）就不动。
+// 这份文件会被 push 进站点，站点又会被复制成模板或别的项目，所以内容里不能写这个站点
+// 特有的信息（project / site ID、编辑器地址）——复制过去就指错了站，而远端已有文件时
+// 不会再生成新的去纠正它。站点身份由 .creght/state.json 记录。
+func ensurePulledAgentsFile(root string, files []creght.File) (bool, error) {
 	ignore, err := loadCreghtIgnore(root)
 	if err != nil {
 		return false, err
@@ -191,7 +195,7 @@ func ensurePulledAgentsFile(root string, files []creght.File, projectID string, 
 		return false, fmt.Errorf("check AGENTS.md: %w", err)
 	}
 
-	body := pulledAgentsFileBody(projectID, siteID, editorURL)
+	body := pulledAgentsFileBody()
 	if err := os.WriteFile(localPath, []byte(body), 0o644); err != nil {
 		return false, fmt.Errorf("write AGENTS.md: %w", err)
 	}
@@ -199,8 +203,8 @@ func ensurePulledAgentsFile(root string, files []creght.File, projectID string, 
 	return true, nil
 }
 
-func pulledAgentsFileBody(projectID string, siteID string, editorURL string) string {
-	return fmt.Sprintf(`# Creght Project Agent Notes
+func pulledAgentsFileBody() string {
+	return `# Creght Project Agent Notes
 
 This is a Creght project pulled by the Creght CLI.
 
@@ -208,10 +212,6 @@ Before editing this project, read the Creght skill. If the skill is not installe
 install it from this manual:
 
 https://github.com/creght-dev/skills/blob/main/readme.md
-
-Project ID: %s
-Site ID: %s
-Editor URL: %s
 
 Workspace layout:
 
@@ -228,21 +228,22 @@ creght func run to test a Func with sample input.
 
 Use the Creght CLI for ongoing maintenance:
 
-The workspace's .creght/state.json records the site ID. From the workspace root
+The workspace's .creght/state.json records the site ID; creght url prints the
+site's preview, live and editor addresses. From the workspace root
 or any child directory, pull, diff, and push discover that state file by walking
 upward, so do not repeat --site_id or --dir unless targeting a different
 workspace explicitly.
 
-`+"```bash"+`
+` + "```bash" + `
 creght pull
 creght diff
 creght push
-`+"```"+`
+` + "```" + `
 
 pull three-way merges remote and local edits; overlapping edits leave git-style
 conflict markers in the file. Use creght resolve --list to find them and
 creght resolve <path> --ours|--theirs (or edit by hand) before pushing.
-`, projectID, siteID, editorURL)
+`
 }
 
 // writeBackupFiles copies path->body contents into a fresh directory under

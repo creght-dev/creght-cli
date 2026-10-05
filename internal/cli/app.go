@@ -495,7 +495,7 @@ func runPull(ctx context.Context, args []string) error {
 	}
 
 	editorURL := siteEditorURL(defaultWebHost(cfg.APIHost), projectID, realSiteID)
-	createdAgents, err := ensurePulledAgentsFile(*dir, nil, projectID, realSiteID, editorURL)
+	createdAgents, err := ensurePulledAgentsFile(*dir, nil)
 	if err != nil {
 		return err
 	}
