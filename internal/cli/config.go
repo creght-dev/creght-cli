@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -123,16 +122,17 @@ func saveConfig(cfg Config) error {
 	return writeConfig(path, cfg)
 }
 
-// deleteConfig forgets the token for the API host in play, keeping every other
-// host's token. The file itself is removed only once no token is left.
+// deleteConfig forgets the token saved for apiHost — the host logout just
+// revoked on, so the two always agree — keeping every other host's token.
 //
-// The saved default stays where it is: logging out of a host named by
-// CREGHT_API_HOST must not repoint the default at that host — and, once its
-// token is gone, must not repoint it at some arbitrary other host either. The
-// default moves only when it is itself the host being logged out of, and then to
-// the lowest-sorted remaining host so the result does not depend on Go's
-// randomized map iteration order.
-func deleteConfig() error {
+// The saved default never moves. It used to slide to the lowest-sorted host
+// still logged in when the default itself was logged out of, which silently
+// pointed every later bare command at another deployment (logging out of
+// creght.cn made creght.com the default). A default with no token left just
+// says "run creght login" on the next command, which is the honest outcome.
+// The file is removed only once it holds nothing worth keeping: no tokens and
+// no default other than the built-in.
+func deleteConfig(apiHost string) error {
 	cfg, err := loadRawConfig()
 	if err != nil {
 		return err
@@ -143,33 +143,21 @@ func deleteConfig() error {
 		return err
 	}
 
-	if len(cfg.Tokens) > 0 {
-		apiHost := strings.TrimSpace(cfg.APIHost)
-		if envHost, ok := envAPIHost(); ok {
-			apiHost = envHost
-		}
-		apiHost = canonicalAPIHost(apiHost)
-		delete(cfg.Tokens, apiHost)
+	delete(cfg.Tokens, canonicalAPIHost(apiHost))
+	cfg.Token = cfg.Tokens[cfg.APIHost]
 
-		if len(cfg.Tokens) > 0 {
-			if canonicalAPIHost(cfg.APIHost) == apiHost {
-				cfg.APIHost = lowestAPIHost(cfg.Tokens)
-			}
-			cfg.APIHost = canonicalAPIHost(cfg.APIHost)
-			cfg.Token = cfg.Tokens[cfg.APIHost]
-			return writeConfig(path, cfg)
+	if len(cfg.Tokens) == 0 && (cfg.APIHost == "" || cfg.APIHost == canonicalAPIHost(defaultAPIHostValue)) {
+		err = os.Remove(path)
+		if os.IsNotExist(err) {
+			return nil
 		}
-	}
-
-	err = os.Remove(path)
-	if os.IsNotExist(err) {
+		if err != nil {
+			return fmt.Errorf("delete config: %w", err)
+		}
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("delete config: %w", err)
-	}
 
-	return nil
+	return writeConfig(path, cfg)
 }
 
 func loadRawConfig() (Config, error) {
@@ -227,21 +215,6 @@ func writeConfig(path string, cfg Config) error {
 	}
 
 	return nil
-}
-
-// lowestAPIHost picks a saved host deterministically, so which login becomes the
-// new default never depends on map iteration order.
-func lowestAPIHost(tokens map[string]string) string {
-	hosts := make([]string, 0, len(tokens))
-	for host := range tokens {
-		hosts = append(hosts, host)
-	}
-	if len(hosts) == 0 {
-		return ""
-	}
-	sort.Strings(hosts)
-
-	return hosts[0]
 }
 
 func tokenForAPIHost(cfg Config, apiHost string, legacyAPIHost string) string {

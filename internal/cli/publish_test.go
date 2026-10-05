@@ -92,9 +92,41 @@ func TestRunLogoutDeletesConfig(t *testing.T) {
 		t.Fatalf("revoke Authorization = %q, want Bearer test", got)
 	}
 
-	_, err = os.Stat(cfgPath)
-	if !os.IsNotExist(err) {
-		t.Fatalf("config still exists or stat failed: %v", err)
+	// The token is gone; the chosen default stays, so the next command still
+	// talks to the same host and says it is not logged in.
+	cfg, err := loadRawConfig()
+	if err != nil {
+		t.Fatalf("loadRawConfig: %v", err)
+	}
+	if len(cfg.Tokens) != 0 || cfg.Token != "" {
+		t.Fatalf("tokens = %v token = %q, want none left", cfg.Tokens, cfg.Token)
+	}
+	if cfg.APIHost != canonicalAPIHost(server.URL) {
+		t.Fatalf("APIHost = %q, want the default kept at %s", cfg.APIHost, server.URL)
+	}
+}
+
+// TestRunLogoutInWorkspaceForgetsTheRevokedHost: inside a workspace pulled from
+// another deployment, logout revokes that deployment's token and must forget
+// that same token — not the saved default's.
+func TestRunLogoutInWorkspaceForgetsTheRevokedHost(t *testing.T) {
+	useTempConfigDir(t)
+	server, revoked := logoutStubServer(t)
+	writeTestConfig(t, `{"api_host":"https://creght.cn","tokens":{"https://creght.cn":"cn-token","`+server.URL+`":"ws-token"}}`)
+	t.Chdir(writeAPIHostWorkspace(t, "p1/s1", server.URL))
+
+	if err := runLogout(context.Background(), nil); err != nil {
+		t.Fatalf("runLogout: %v", err)
+	}
+	if got := revoked(); got != "Bearer ws-token" {
+		t.Fatalf("revoke Authorization = %q, want the workspace host's token", got)
+	}
+	cfg := readTestConfig(t)
+	if _, ok := cfg.Tokens[canonicalAPIHost(server.URL)]; ok {
+		t.Fatalf("workspace host token still saved")
+	}
+	if cfg.Tokens["https://creght.cn"] != "cn-token" || cfg.APIHost != "https://creght.cn" {
+		t.Fatalf("cfg = %+v, want the default host and its token untouched", cfg)
 	}
 }
 
@@ -214,8 +246,12 @@ func TestRunLogoutLocalOnlySkipsRevoke(t *testing.T) {
 	if err := runLogout(context.Background(), []string{"--local_only"}); err != nil {
 		t.Fatalf("runLogout --local_only: %v", err)
 	}
-	if _, statErr := os.Stat(cfgPath); !os.IsNotExist(statErr) {
-		t.Fatalf("config should be removed: %v", statErr)
+	cfg, err := loadRawConfig()
+	if err != nil {
+		t.Fatalf("loadRawConfig: %v", err)
+	}
+	if len(cfg.Tokens) != 0 || cfg.Token != "" {
+		t.Fatalf("tokens = %v token = %q, want the token forgotten", cfg.Tokens, cfg.Token)
 	}
 }
 

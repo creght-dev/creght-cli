@@ -114,9 +114,9 @@ Remove the saved CLI login for the current API host:
 creght logout
 ```
 
-When `CREGHT_API_HOST` is set, `logout` removes only that host's token. Other saved hosts remain logged in. If the last saved token is removed, the config file is deleted.
+`logout` revokes and forgets the token of the API host in effect — `CREGHT_API_HOST`, the workspace's recorded host, or the saved default, resolved the same way as every other command. Other saved hosts remain logged in.
 
-Logging out does not move the default API host either, unless the default is the host being logged out of.
+Logging out never moves the default API host, not even when the default is the host being logged out of: the next command still talks to that host and asks you to run `creght login`. The config file is deleted only when no token is left and the default is the built-in one.
 
 ## API Host
 

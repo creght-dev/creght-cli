@@ -308,7 +308,7 @@ func TestDeleteConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
 		}
 	}`)
 
-	if err := deleteConfig(); err != nil {
+	if err := deleteConfig("https://creght.com"); err != nil {
 		t.Fatalf("deleteConfig: %v", err)
 	}
 
@@ -324,34 +324,55 @@ func TestDeleteConfigKeepsDefaultAPIHostWhenEnvOverrides(t *testing.T) {
 	}
 }
 
-// TestDeleteConfigMovesRemovedDefaultDeterministically covers the one case where
-// the default does have to move — it was the host logged out of — and checks the
-// replacement is not whichever host map iteration happened to reach first.
-func TestDeleteConfigMovesRemovedDefaultDeterministically(t *testing.T) {
-	for i := 0; i < 8; i++ {
-		useTempConfigDir(t)
-
-		writeTestConfig(t, `{
-			"api_host": "https://creght.cn",
-			"token": "cn-token",
-			"tokens": {
-				"https://creght.cn": "cn-token",
-				"https://creght.com": "com-token",
-				"https://talizen.com": "talizen-token"
-			}
-		}`)
-
-		if err := deleteConfig(); err != nil {
-			t.Fatalf("deleteConfig: %v", err)
+// TestDeleteConfigKeepsDefaultWhenLoggingOutOfIt guards the regression where
+// logging out of the default host moved the default to the lowest-sorted host
+// still logged in, so logging out of creght.cn silently switched every later
+// command to creght.com.
+func TestDeleteConfigKeepsDefaultWhenLoggingOutOfIt(t *testing.T) {
+	useTempConfigDir(t)
+	writeTestConfig(t, `{
+		"api_host": "https://creght.cn",
+		"token": "cn-token",
+		"tokens": {
+			"https://creght.cn": "cn-token",
+			"https://creght.com": "com-token",
+			"https://talizen.com": "talizen-token"
 		}
+	}`)
 
-		cfg := readTestConfig(t)
-		if cfg.APIHost != "https://creght.com" {
-			t.Fatalf("APIHost = %q, want https://creght.com", cfg.APIHost)
-		}
-		if cfg.Token != "com-token" {
-			t.Fatalf("Token = %q, want com-token", cfg.Token)
-		}
+	if err := deleteConfig("https://creght.cn"); err != nil {
+		t.Fatalf("deleteConfig: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != "https://creght.cn" {
+		t.Fatalf("APIHost = %q, want the default left at https://creght.cn", cfg.APIHost)
+	}
+	if cfg.Token != "" {
+		t.Fatalf("Token = %q, want empty", cfg.Token)
+	}
+	if _, ok := cfg.Tokens["https://creght.cn"]; ok {
+		t.Fatalf("cn token still saved")
+	}
+	if cfg.Tokens["https://creght.com"] != "com-token" || cfg.Tokens["https://talizen.com"] != "talizen-token" {
+		t.Fatalf("tokens = %v, want the other hosts kept", cfg.Tokens)
+	}
+}
+
+// TestDeleteConfigKeepsChosenDefaultWithNoTokensLeft: removing the last token
+// must not delete a default the user chose, or it would fall back to the
+// built-in host.
+func TestDeleteConfigKeepsChosenDefaultWithNoTokensLeft(t *testing.T) {
+	useTempConfigDir(t)
+	writeTestConfig(t, `{"api_host":"https://creght.com","tokens":{"https://creght.com":"com-token"}}`)
+
+	if err := deleteConfig("https://creght.com"); err != nil {
+		t.Fatalf("deleteConfig: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if cfg.APIHost != "https://creght.com" || len(cfg.Tokens) != 0 {
+		t.Fatalf("cfg = %+v, want default kept and no tokens", cfg)
 	}
 }
 

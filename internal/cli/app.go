@@ -200,14 +200,15 @@ func runLogout(ctx context.Context, args []string) error {
 		}
 	}
 
-	if err := deleteConfig(); err != nil {
+	host := canonicalAPIHost(cfg.APIHost)
+	if err := deleteConfig(host); err != nil {
 		return err
 	}
 
 	if *localOnly {
-		fmt.Println("Local credentials removed. The token is still valid server-side until it expires.")
+		fmt.Printf("Local credentials for %s removed. The token is still valid server-side until it expires.\n", host)
 	} else {
-		fmt.Println("Logged out.")
+		fmt.Printf("Logged out of %s.\n", host)
 	}
 	return nil
 }
