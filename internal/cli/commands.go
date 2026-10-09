@@ -94,7 +94,9 @@ while it is set; creght whoami shows which token is in use.`, helpAPIHostBlock()
 	root.AddCommand(loginCommand(ctx, rawArgs))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"logout"}, "logout", "Remove the saved CLI login for the current API host.", func(ctx context.Context, args []string) error {
 		return runLogout(ctx, args)
-	}, nil))
+	}, func(flags *pflag.FlagSet) {
+		flags.Bool("local_only", false, "Only forget the local login; do not revoke the token server-side (for when the platform is unreachable).")
+	}))
 	root.AddCommand(configCommand(ctx, rawArgs))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"whoami"}, "whoami", "Show the API host, where the token in use comes from, and whose it is.", runWhoami, func(flags *pflag.FlagSet) {
 		flags.Bool("json", false, `Print {"api_host","token_source","user"} as JSON; token_source is env, saved or none.`)
@@ -371,8 +373,15 @@ unpushed, listing what to push. --allow-dirty skips that check and snapshots
 the remote site as it is.
 
 The platform rejects a snapshot identical to the newest version, so repeated
-creates never pile up duplicates.`),
+creates never pile up duplicates.
+
+--tag labels the new version, like a git tag: letters, digits and . _ - +,
+starting with a letter or digit, at most 64 characters, unique within the site
+and fixed once set. Version numbers count per site, so the same content gets
+different numbers on different sites; a tag you choose stays the same, and
+version list shows it in the TAG column (and as "tag" in --json).`),
 		withExample(`  creght version create --note="Add pricing page"
+  creght version create --note="Release" --tag=v135
   creght version create --note="Checkpoint" --allow-dirty
   creght version create --site_id=<pid>/<sid> --note="Add pricing page"`)))
 	cmd.AddCommand(legacyCommandPass(ctx, rawArgs, []string{"version"}, "list", "List site versions, newest first, and show which one is live.", runVersion, addVersionListFlags,
@@ -907,6 +916,7 @@ func addSiteTargetFlags(flags *pflag.FlagSet) {
 func addVersionCreateFlags(flags *pflag.FlagSet) {
 	addSiteTargetFlags(flags)
 	flags.String("note", "", "Note describing what this version contains.")
+	flags.String("tag", "", "Label for the new version, unique within the site (e.g. v135); cannot be changed later.")
 	flags.Bool("allow-dirty", false, "Snapshot the remote site even when local changes are unpushed.")
 	flags.Bool("json", false, "Print the created version as JSON.")
 }
