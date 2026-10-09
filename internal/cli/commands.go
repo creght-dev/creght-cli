@@ -541,7 +541,7 @@ func originalArgsAfter(rawArgs []string, path []string) []string {
 
 func loginCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 	return legacyCommand(ctx, rawArgs, []string{"login"}, "login", "Authenticate this machine with Creght and save a CLI token for the current API host.", runLogin, func(flags *pflag.FlagSet) {
-		flags.String("web", "", "Creght web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or https://creght.cn.")
+		flags.String("web", "", "Creght web host. Defaults to CREGHT_WEB_HOST, localhost:5173 for local APIs, or the API host.")
 	})
 }
 

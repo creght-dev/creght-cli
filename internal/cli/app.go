@@ -52,19 +52,17 @@ func defaultWebHost(apiHost string) string {
 		return v
 	}
 
+	// 线上的网页和 API 同域（creght.cn / creght.com / talizen.com 各是一个集群），
+	// 跟着 API host 走；写死 creght.cn 会把连 com 的用户送去 cn 登录。
 	u, err := url.Parse(apiHost)
-	if err == nil {
-		host := u.Hostname()
-		if host == "localhost" || host == "127.0.0.1" {
-			u.Host = "localhost:5173"
-			u.Path = ""
-			u.RawQuery = ""
-			u.Fragment = ""
-			return strings.TrimRight(u.String(), "/")
-		}
+	if err != nil || u.Host == "" {
+		return defaultWebHostValue
 	}
-
-	return defaultWebHostValue
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" {
+		u.Host = "localhost:5173"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func clientFromConfig() (*creght.Client, Config, error) {
