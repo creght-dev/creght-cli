@@ -1002,9 +1002,12 @@ func (c *Client) DoSiteAction(ctx context.Context, projectID string, siteID stri
 // Snapshots cover source files only. CMS content and the platform state under
 // /platform/** are live, so they are neither captured nor restored.
 type SiteVersion struct {
-	ID        int64     `json:"id"`
-	VersionNo int64     `json:"version_no"`
-	Note      string    `json:"note"`
+	ID        int64  `json:"id"`
+	VersionNo int64  `json:"version_no"`
+	Note      string `json:"note"`
+	// Tag is a publisher-chosen label set when the version was created (like a
+	// git tag, e.g. v135). Unique within the site, empty when none was given.
+	Tag       string    `json:"tag"`
 	From      string    `json:"from"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -1075,6 +1078,7 @@ func (s SitePublishState) FindVersionByID(versionID int64) (SiteVersion, bool) {
 type PublishVersionResult struct {
 	VersionID int64    `json:"version_id"`
 	VersionNo int64    `json:"version_no"`
+	Tag       string   `json:"tag,omitempty"`
 	Created   bool     `json:"created"`
 	Published bool     `json:"published"`
 	Changed   bool     `json:"changed"`
@@ -1095,12 +1099,20 @@ func (c *Client) GetSitePublishState(ctx context.Context, projectID string, site
 // CreateSiteVersion snapshots the remote workspace into a new version without
 // touching the live site. The server rejects it when the workspace is identical
 // to the newest version, so versions never duplicate.
-func (c *Client) CreateSiteVersion(ctx context.Context, projectID string, siteID string, note string) (PublishVersionResult, error) {
-	return c.postPublishVersion(ctx, projectID, siteID, map[string]any{
+//
+// tag is optional. The server validates it (letters, digits and . _ - +,
+// starting with a letter or digit, at most 64) and rejects one already used on
+// the site; a version's tag cannot be changed later.
+func (c *Client) CreateSiteVersion(ctx context.Context, projectID string, siteID string, note string, tag string) (PublishVersionResult, error) {
+	body := map[string]any{
 		"version_id":  0,
 		"note":        strings.TrimSpace(note),
 		"create_only": true,
-	})
+	}
+	if tag = strings.TrimSpace(tag); tag != "" {
+		body["tag"] = tag
+	}
+	return c.postPublishVersion(ctx, projectID, siteID, body)
 }
 
 // PublishSiteVersion points the live site at an existing version. Domains pinned

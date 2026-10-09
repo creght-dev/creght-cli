@@ -53,7 +53,7 @@ func printVersionUsage() {
 
 Usage:
   creght version                                     Print the installed CLI version
-  creght version create [--note=<note>]                Snapshot the remote site source into a new version
+  creght version create [--note=<note>] [--tag=<tag>]  Snapshot the remote site source into a new version
   creght version list [--limit=<n>] [--json]           List site versions, newest first
   creght version publish <version_no> [--note=<note>]  Make an existing version live
   creght version cat <version_no> <path>               Print a file as of that version
@@ -65,7 +65,12 @@ Notes:
   .creght/state.json like pull/push do.
 
   <version_no> is the per-site number shown in the VERSION column of
-  creght version list. Pass id:<version_id> to select by id instead.`)
+  creght version list. Pass id:<version_id> to select by id instead.
+
+  --tag labels the new version, like a git tag: letters, digits and . _ - +,
+  starting with a letter or digit, at most 64, unique within the site, and
+  fixed once created. version_no counts per site, so the same content gets
+  different numbers on different sites; a tag you choose stays the same.`)
 }
 
 // siteTargetFlags registers the site/workspace flags a command accepts,
@@ -100,6 +105,7 @@ func runVersionCreate(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("version create", flag.ContinueOnError)
 	siteID, dir := siteTargetFlags(fs)
 	note := fs.String("note", "", "version note")
+	tag := fs.String("tag", "", "label for the new version, unique within the site (e.g. v135)")
 	allowDirty := fs.Bool("allow-dirty", false, "snapshot the remote workspace even when local changes are unpushed")
 	jsonOut := fs.Bool("json", false, "output the created version as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -125,9 +131,13 @@ func runVersionCreate(ctx context.Context, args []string) error {
 		}
 	}
 
-	result, err := client.CreateSiteVersion(ctx, projectID, realSiteID, *note)
+	result, err := client.CreateSiteVersion(ctx, projectID, realSiteID, *note, *tag)
 	if err != nil {
 		return err
+	}
+	if result.Tag == "" {
+		// Older backends do not echo the tag back; it was sent, so report it.
+		result.Tag = strings.TrimSpace(*tag)
 	}
 	if *jsonOut {
 		return printJSON(result)
@@ -136,6 +146,9 @@ func runVersionCreate(ctx context.Context, args []string) error {
 	fmt.Printf("Created %s of %s/%s\n", versionLabel(result.VersionNo, result.VersionID), projectID, realSiteID)
 	if strings.TrimSpace(*note) != "" {
 		fmt.Printf("note: %s\n", strings.TrimSpace(*note))
+	}
+	if result.Tag != "" {
+		fmt.Printf("tag: %s\n", result.Tag)
 	}
 	fmt.Printf("Not live yet; run creght version publish %s to serve it\n", publishSelector(result.VersionNo, result.VersionID))
 	return nil
@@ -191,15 +204,15 @@ func printVersionList(out io.Writer, state creght.SitePublishState, limit int) {
 		}
 	} else {
 		w := tabwriter.NewWriter(out, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(w, "\tVERSION\tID\tCREATED\tFROM\tNOTE")
+		fmt.Fprintln(w, "\tVERSION\tID\tTAG\tCREATED\tFROM\tNOTE")
 		for _, version := range versions {
 			marker := " "
 			if version.ID == state.CurrentVersionID {
 				marker = "*"
 			}
 			fmt.Fprintf(
-				w, "%s\t%s\t%d\t%s\t%s\t%s\n",
-				marker, versionNoColumn(version.VersionNo), version.ID,
+				w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+				marker, versionNoColumn(version.VersionNo), version.ID, dashIfEmpty(version.Tag),
 				formatVersionTime(version.CreatedAt), dashIfEmpty(version.From), dashIfEmpty(version.Note),
 			)
 		}

@@ -11,9 +11,10 @@ import (
 // publishVersionRequest is what the CLI sends to the publish/version endpoint.
 // create_only is a pointer so tests can tell "absent" from "false".
 type publishVersionRequest struct {
-	VersionID  int64  `json:"version_id"`
-	Note       string `json:"note"`
-	CreateOnly *bool  `json:"create_only"`
+	VersionID  int64   `json:"version_id"`
+	Note       string  `json:"note"`
+	CreateOnly *bool   `json:"create_only"`
+	Tag        *string `json:"tag"`
 }
 
 // publishVersionServer captures the publish/version request a client call makes
@@ -72,7 +73,7 @@ func TestCreateSiteVersionSnapshotsWithoutPublishing(t *testing.T) {
 	server, got := publishVersionServer(t, `{"version_id":456,"version_no":12,"created":true}`)
 
 	client := NewClient(server.URL, "")
-	result, err := client.CreateSiteVersion(context.Background(), "project-1", "site-1", "  Add pricing page  ")
+	result, err := client.CreateSiteVersion(context.Background(), "project-1", "site-1", "  Add pricing page  ", "")
 	if err != nil {
 		t.Fatalf("CreateSiteVersion: %v", err)
 	}
@@ -91,6 +92,24 @@ func TestCreateSiteVersionSnapshotsWithoutPublishing(t *testing.T) {
 	}
 	if result.Published {
 		t.Fatalf("result.Published = true, want false for a create-only call")
+	}
+	if got.Tag != nil {
+		t.Fatalf("tag = %q, want it left out when none was given", *got.Tag)
+	}
+}
+
+func TestCreateSiteVersionSendsTag(t *testing.T) {
+	server, got := publishVersionServer(t, `{"version_id":457,"version_no":13,"created":true}`)
+
+	client := NewClient(server.URL, "")
+	if _, err := client.CreateSiteVersion(context.Background(), "project-1", "site-1", "", " v135 "); err != nil {
+		t.Fatalf("CreateSiteVersion: %v", err)
+	}
+	if got.Tag == nil || *got.Tag != "v135" {
+		t.Fatalf("tag = %v, want trimmed v135", got.Tag)
+	}
+	if got.CreateOnly == nil || !*got.CreateOnly {
+		t.Fatalf("create_only = %v, want true", got.CreateOnly)
 	}
 }
 

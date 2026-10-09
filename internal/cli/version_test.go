@@ -319,7 +319,7 @@ func TestPrintVersionListMarksLiveVersionAndPendingChanges(t *testing.T) {
 	created := time.Date(2026, 8, 5, 14, 31, 0, 0, time.Local)
 	state := creght.SitePublishState{
 		Versions: []creght.SiteVersion{
-			{ID: 456, VersionNo: 12, Note: "Add pricing page", From: "api_generate_version", CreatedAt: created},
+			{ID: 456, VersionNo: 12, Note: "Add pricing page", Tag: "v135", From: "api_generate_version", CreatedAt: created},
 			{ID: 455, VersionNo: 11, Note: "Fix nav", From: "publish", CreatedAt: created.Add(-3 * time.Hour)},
 		},
 		CurrentVersionID: 455,
@@ -338,7 +338,7 @@ func TestPrintVersionListMarksLiveVersionAndPendingChanges(t *testing.T) {
 	got := out.String()
 
 	for _, want := range []string{
-		"VERSION", "12", "456", "2026-08-05 14:31", "api_generate_version", "Add pricing page",
+		"VERSION", "TAG", "12", "456", "v135", "2026-08-05 14:31", "api_generate_version", "Add pricing page",
 		"* live: version 11 (id 455), served by demo.creght.cn",
 		"pinned: www.example.com -> version 12 (id 456)",
 		"1 change is pending on the site since the newest version",
