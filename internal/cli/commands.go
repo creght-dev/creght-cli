@@ -330,6 +330,18 @@ the workspace copy. Inside a pulled workspace, --site_id is optional.`),
 	root.AddCommand(tableCommand(ctx, rawArgs))
 	root.AddCommand(funcCommand(ctx, rawArgs))
 	root.AddCommand(uploadCommand(ctx, rawArgs))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"export"}, "export <project_id>", "Download a project as a package to move it to another Creght deployment.", runExport, func(flags *pflag.FlagSet) {
+		flags.String("out", "", "Output file (default <project_id>-<time>.creght.zip).")
+		flags.String("with", "", "Optional data to include: members,form_logs.")
+		flags.String("site_ids", "", "Only export these sites (comma separated).")
+		flags.String("project_id", "", "Project id.")
+	}))
+	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"import"}, "import <file.zip>", "Create a project from a package made by creght export.", runImport, func(flags *pflag.FlagSet) {
+		flags.String("name", "", "Name of the new project.")
+		flags.Bool("skip-members", false, "Do not import site members.")
+		flags.Bool("bind-domains", false, "Bind the package's custom domains to the new sites (self-hosted creght).")
+		flags.Bool("json", false, "Print the import result as JSON.")
+	}))
 	root.AddCommand(versionCommand(ctx, rawArgs))
 
 	return root
