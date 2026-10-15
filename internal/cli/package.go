@@ -43,17 +43,28 @@ func runExport(ctx context.Context, args []string) error {
 		file = fmt.Sprintf("%s-%s.creght.zip", projectID, time.Now().Format("20060102-150405"))
 	}
 
-	client, _, err := clientFromConfig()
+	client, cfg, err := clientFromConfig()
 	if err != nil {
 		return err
 	}
+	// Newer servers return only the asset list and the CLI downloads the files
+	// (package_assets.go); older ones stream everything themselves.
+	if client.ExportCapabilityVersion(ctx) >= 3 {
+		n, err := exportWithClientAssets(ctx, client, cfg.APIHost, projectID, splitList(*siteIDs), splitList(*with), file)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("exported %s (%.1f MB)\n", file, float64(n)/1024/1024)
+		return nil
+	}
+
 	tmp := file + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
 	prog := newTransferProgress("downloading", 0)
-	n, err := client.ExportProjectPackage(ctx, projectID, splitList(*siteIDs), splitList(*with), progressWriter{w: f, p: prog})
+	n, err := client.ExportProjectPackage(ctx, projectID, splitList(*siteIDs), splitList(*with), false, progressWriter{w: f, p: prog})
 	prog.done()
 	if cerr := f.Close(); err == nil {
 		err = cerr

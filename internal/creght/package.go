@@ -22,10 +22,38 @@ import (
 // normal. Cancellation goes through ctx.
 var packageHTTP = &http.Client{}
 
+// ExportCapabilityVersion returns the server's "export" capability version from
+// the public system info (0 when unknown). From version 3 the server can return
+// just the asset manifest and leave downloading the asset files to the client.
+func (c *Client) ExportCapabilityVersion(ctx context.Context) int {
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/api/tr/system_info", nil, nil, &raw); err != nil {
+		return 0
+	}
+	var info struct {
+		Data         json.RawMessage `json:"data"`
+		Capabilities map[string]struct {
+			Version int `json:"version"`
+		} `json:"capabilities"`
+	}
+	if json.Unmarshal(raw, &info) != nil {
+		return 0
+	}
+	if info.Capabilities == nil && len(info.Data) > 0 {
+		_ = json.Unmarshal(info.Data, &info)
+	}
+	return info.Capabilities["export"].Version
+}
+
 // ExportProjectPackage writes the package (a zip) to w. with may name the
-// optional data "members" and "form_logs".
-func (c *Client) ExportProjectPackage(ctx context.Context, projectID string, siteIDs, with []string, w io.Writer) (int64, error) {
+// optional data "members" and "form_logs". With manifestOnly the zip holds only
+// project_data.json, whose "assets" list the files still to be downloaded
+// (servers with export capability >= 3).
+func (c *Client) ExportProjectPackage(ctx context.Context, projectID string, siteIDs, with []string, manifestOnly bool, w io.Writer) (int64, error) {
 	q := url.Values{}
+	if manifestOnly {
+		q.Set("assets", "manifest")
+	}
 	if len(siteIDs) > 0 {
 		q.Set("site_ids", strings.Join(siteIDs, ","))
 	}
