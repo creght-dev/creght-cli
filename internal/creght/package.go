@@ -13,13 +13,17 @@ import (
 	"strings"
 )
 
-// 导出包 v2：把一个站点整个搬到另一个 creght 部署（独立部署版或别的集群）。
-// 格式见 weave docs/architecture/selfhost-export.md。
+// Project packages (format v2) move a whole project to another Creght
+// deployment, e.g. a self-hosted one: code, CMS, forms, tables, members and
+// asset files in one zip. Exporting and importing both need maintainer access.
 
-// packageHTTP 不设总超时：导出要边下载素材边写，导入要上传整个包，几分钟都正常；靠 ctx 取消。
+// packageHTTP has no overall timeout: the server streams assets into the export
+// as it downloads them and an import uploads the whole package, so minutes are
+// normal. Cancellation goes through ctx.
 var packageHTTP = &http.Client{}
 
-// ExportProjectPackage 把导出包（zip）写到 w。with 可选 "members"、"form_logs"。
+// ExportProjectPackage writes the package (a zip) to w. with may name the
+// optional data "members" and "form_logs".
 func (c *Client) ExportProjectPackage(ctx context.Context, projectID string, siteIDs, with []string, w io.Writer) (int64, error) {
 	q := url.Values{}
 	if len(siteIDs) > 0 {
@@ -61,7 +65,8 @@ type ImportPackageOptions struct {
 	BindDomains    bool
 }
 
-// ImportProjectPackage 上传导出包建一个新项目，返回接口的结果（project_id、sites、missing_secrets…）。
+// ImportProjectPackage uploads a package and creates a new project from it. It
+// returns the server's result (project_id, sites, missing_secrets, ...).
 func (c *Client) ImportProjectPackage(ctx context.Context, fileName string, pkg io.Reader, opts ImportPackageOptions) (json.RawMessage, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)

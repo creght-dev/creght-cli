@@ -13,8 +13,9 @@ import (
 	"github.com/creght-dev/creght-cli/internal/creght"
 )
 
-// creght export / creght import：导出包 v2，把站点整个搬到另一个 creght 部署（独立部署版或别的集群）。
-// 导出、导入都要 maintainer 身份；独立部署版的管理员令牌就是。
+// creght export / creght import move a whole project to another Creght
+// deployment (e.g. a self-hosted one) as a package. Both need maintainer
+// access; on a self-hosted deployment the admin token has it.
 
 func runExport(ctx context.Context, args []string) error {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
@@ -161,7 +162,8 @@ func splitList(s string) []string {
 	return out
 }
 
-// reorderFlags 让 flag 包也能接受「位置参数在前、flag 在后」：creght import site.zip --bind-domains。
+// reorderFlags lets the flag package accept positional arguments before flags,
+// e.g. `creght import site.zip --bind-domains`.
 func reorderFlags(args []string) []string {
 	var flags, pos []string
 	for _, a := range args {
