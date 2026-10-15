@@ -52,7 +52,9 @@ func runExport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	n, err := client.ExportProjectPackage(ctx, projectID, splitList(*siteIDs), splitList(*with), f)
+	prog := newTransferProgress("downloading", 0)
+	n, err := client.ExportProjectPackage(ctx, projectID, splitList(*siteIDs), splitList(*with), progressWriter{w: f, p: prog})
+	prog.done()
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -95,9 +97,17 @@ func runImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := client.ImportProjectPackage(ctx, filepath.Base(path), f, creght.ImportPackageOptions{
+	var size int64
+	if info, err := f.Stat(); err == nil {
+		size = info.Size()
+	}
+	// The upload finishes before the server is done importing; the line then
+	// stays at 100% until the server answers.
+	prog := newTransferProgress("uploading", size)
+	raw, err := client.ImportProjectPackage(ctx, filepath.Base(path), progressReader{r: f, p: prog}, creght.ImportPackageOptions{
 		NewProjectName: *name, SkipMembers: *skipMembers, BindDomains: *bindDomains,
 	})
+	prog.done()
 	if err != nil {
 		return err
 	}
