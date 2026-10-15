@@ -46,7 +46,7 @@ func TestClientAssetsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	prog := newTransferProgress("x", 0)
-	results := downloadAssets(context.Background(), assets, srv.URL, t.TempDir(), prog)
+	results := downloadAssets(context.Background(), assets, srv.URL, t.TempDir(), 0, prog)
 	var out bytes.Buffer
 	if _, err := writePackage(&out, data, assets, results); err != nil {
 		t.Fatal(err)

@@ -27,6 +27,8 @@ func runExport(ctx context.Context, args []string) error {
 	with := fs.String("with", "", "optional data to include: members,form_logs")
 	siteIDs := fs.String("site_ids", "", "only export these sites (comma separated)")
 	projectFlag := fs.String("project_id", "", "project id")
+	skipAssets := fs.String("skip-assets", "", "leave these asset files out, by extension or file-name pattern: dmg,exe or '*_setup.exe'")
+	maxAssetSize := fs.String("max-asset-size", "", "leave out asset files larger than this, e.g. 20MB")
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return err
 	}
@@ -43,14 +45,23 @@ func runExport(ctx context.Context, args []string) error {
 		file = fmt.Sprintf("%s-%s.creght.zip", projectID, time.Now().Format("20060102-150405"))
 	}
 
+	skip, err := parseAssetSkip(*skipAssets, *maxAssetSize)
+	if err != nil {
+		return err
+	}
+
 	client, cfg, err := clientFromConfig()
 	if err != nil {
 		return err
 	}
 	// Newer servers return only the asset list and the CLI downloads the files
 	// (package_assets.go); older ones stream everything themselves.
-	if client.ExportCapabilityVersion(ctx) >= 3 {
-		n, err := exportWithClientAssets(ctx, client, cfg.APIHost, projectID, splitList(*siteIDs), splitList(*with), file)
+	clientAssets := client.ExportCapabilityVersion(ctx) >= 3
+	if !clientAssets && skip.active() {
+		return fmt.Errorf("%s packs asset files on the server, so --skip-assets / --max-asset-size cannot be used with it", cfg.APIHost)
+	}
+	if clientAssets {
+		n, err := exportWithClientAssets(ctx, client, cfg.APIHost, projectID, splitList(*siteIDs), splitList(*with), skip, file)
 		if err != nil {
 			return err
 		}
@@ -201,7 +212,7 @@ func reorderFlags(args []string) []string {
 
 func needsValue(flagArg string) bool {
 	switch strings.TrimLeft(flagArg, "-") {
-	case "out", "with", "site_ids", "project_id", "name":
+	case "out", "with", "site_ids", "project_id", "name", "skip-assets", "max-asset-size":
 		return true
 	}
 	return false
@@ -209,11 +220,17 @@ func needsValue(flagArg string) bool {
 
 func printExportUsage() {
 	fmt.Println(`Usage: creght export <project_id> [--out file.zip] [--with members,form_logs] [--site_ids a,b]
+                     [--skip-assets dmg,exe] [--max-asset-size 20MB]
 
 Download a project as a package (code, CMS, forms, tables, members, assets) that
 "creght import" can load into another Creght deployment, e.g. a self-hosted one.
+Only asset files that something in the project refers to are included.
 Secrets (integration keys, OAuth client secrets, secret env values) are never exported.
-Requires maintainer access.`)
+Requires maintainer access.
+
+--skip-assets and --max-asset-size leave asset files out of the package (for
+example desktop installers); after import those links keep pointing at the
+source deployment. Patterns match the file name: "dmg" is short for "*.dmg".`)
 }
 
 func printImportUsage() {

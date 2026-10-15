@@ -45,7 +45,7 @@ var assetHTTP = &http.Client{Timeout: 10 * time.Minute}
 
 // exportWithClientAssets fetches the manifest, downloads the assets and writes
 // the finished package to file. It returns the package size.
-func exportWithClientAssets(ctx context.Context, client *creght.Client, apiHost, projectID string, siteIDs, with []string, file string) (int64, error) {
+func exportWithClientAssets(ctx context.Context, client *creght.Client, apiHost, projectID string, siteIDs, with []string, skip assetSkip, file string) (int64, error) {
 	var manifest bytes.Buffer
 	if _, err := client.ExportProjectPackage(ctx, projectID, siteIDs, with, true, &manifest); err != nil {
 		return 0, err
@@ -61,14 +61,30 @@ func exportWithClientAssets(ctx context.Context, client *creght.Client, apiHost,
 	}
 	defer os.RemoveAll(tmpDir)
 
-	var total int64
+	// Leave out what --skip-assets / --max-asset-size exclude before downloading anything.
+	var keep []packageAsset
+	var skipped []assetResult
+	var skippedBytes, total int64
 	for _, a := range assets {
+		if why := skip.reason(a.Key, a.Size); why != "" {
+			skipped = append(skipped, assetResult{asset: a, err: errAssetSkipped, skipReason: why})
+			skippedBytes += a.Size
+			continue
+		}
+		keep = append(keep, a)
 		total += a.Size
 	}
 	prog := newTransferProgress("downloading assets", total)
-	prog.filesTotal = len(assets)
-	results := downloadAssets(ctx, assets, apiHost, tmpDir, prog)
+	prog.filesTotal = len(keep)
+	results := downloadAssets(ctx, keep, apiHost, tmpDir, skip.maxBytes, prog)
 	prog.done()
+	for i, r := range results {
+		// Size unknown up front, found too big while downloading: counts as skipped, not failed.
+		if errors.Is(r.err, errAssetTooLarge) && skip.maxBytes > 0 {
+			results[i].err, results[i].skipReason = errAssetSkipped, fmt.Sprintf("larger than %s", formatMB(skip.maxBytes))
+		}
+	}
+	results = append(results, skipped...)
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}
@@ -89,16 +105,23 @@ func exportWithClientAssets(ctx context.Context, client *creght.Client, apiHost,
 	if err := os.Rename(tmp, file); err != nil {
 		return 0, err
 	}
-	var failed int
+	var failed, skippedN int
 	for _, r := range results {
-		if r.err != nil {
+		switch {
+		case errors.Is(r.err, errAssetSkipped):
+			skippedN++
+			skippedBytes += r.size
+		case r.err != nil:
 			failed++
 			fmt.Fprintf(os.Stderr, "  not packed (stays at its old URL): %s: %v\n", r.asset.URL, r.err)
 		}
 	}
-	fmt.Printf("  assets: %d packed", len(assets)-failed)
+	fmt.Printf("  assets: %d packed", len(results)-failed-skippedN)
+	if skippedN > 0 {
+		fmt.Printf(", %d skipped (%s, they keep pointing at the source deployment)", skippedN, formatMB(skippedBytes))
+	}
 	if failed > 0 {
-		fmt.Printf(", %d not packed", failed)
+		fmt.Printf(", %d failed", failed)
 	}
 	fmt.Println()
 	return n, nil
@@ -154,12 +177,15 @@ type assetResult struct {
 	size        int64
 	contentType string
 	err         error
+	skipReason  string
 }
+
+var errAssetSkipped = errors.New("skipped")
 
 // downloadAssets downloads every asset into dir. Relative URLs (a self-hosted
 // deployment without its own domain yet serves assets at /creght-assets/...)
 // are resolved against apiHost.
-func downloadAssets(ctx context.Context, assets []packageAsset, apiHost, dir string, prog *transferProgress) []assetResult {
+func downloadAssets(ctx context.Context, assets []packageAsset, apiHost, dir string, maxBytes int64, prog *transferProgress) []assetResult {
 	results := make([]assetResult, len(assets))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -171,7 +197,7 @@ func downloadAssets(ctx context.Context, assets []packageAsset, apiHost, dir str
 				a := assets[i]
 				r := assetResult{asset: a, file: filepath.Join(dir, fmt.Sprintf("%d", i))}
 				for attempt := 1; ; attempt++ {
-					r.size, r.contentType, r.err = downloadAsset(ctx, absoluteAssetURL(apiHost, a.URL), r.file, prog)
+					r.size, r.contentType, r.err = downloadAsset(ctx, absoluteAssetURL(apiHost, a.URL), r.file, maxBytes, prog, i, path.Base(a.Key), a.Size)
 					if r.err == nil || attempt >= packageAssetRetries || ctx.Err() != nil || errors.Is(r.err, errAssetTooLarge) {
 						break
 					}
@@ -202,7 +228,12 @@ func absoluteAssetURL(apiHost, u string) string {
 
 var errAssetTooLarge = fmt.Errorf("larger than %d MB", packageAssetMaxBytes>>20)
 
-func downloadAsset(ctx context.Context, url, file string, prog *transferProgress) (int64, string, error) {
+// downloadAsset downloads one file. limit (0: the package limit) caps its size.
+// fileID / name / size describe the file for its own progress line.
+func downloadAsset(ctx context.Context, url, file string, limit int64, prog *transferProgress, fileID int, name string, size int64) (int64, string, error) {
+	if limit <= 0 || limit > packageAssetMaxBytes {
+		limit = packageAssetMaxBytes
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, "", err
@@ -215,9 +246,14 @@ func downloadAsset(ctx context.Context, url, file string, prog *transferProgress
 	if resp.StatusCode != http.StatusOK {
 		return 0, "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	if resp.ContentLength > packageAssetMaxBytes {
+	if resp.ContentLength > limit {
 		return 0, "", errAssetTooLarge
 	}
+	if resp.ContentLength > 0 {
+		size = resp.ContentLength
+	}
+	prog.startFile(fileID, name, size)
+	defer prog.endFile(fileID)
 	f, err := os.Create(file)
 	if err != nil {
 		return 0, "", err
@@ -225,12 +261,12 @@ func downloadAsset(ctx context.Context, url, file string, prog *transferProgress
 	defer f.Close()
 	// A retry starts over; take back the bytes the failed attempt counted.
 	var counted int64
-	n, err := io.Copy(f, progressReader{r: io.LimitReader(resp.Body, packageAssetMaxBytes+1), p: prog, counted: &counted})
+	n, err := io.Copy(f, progressReader{r: io.LimitReader(resp.Body, limit+1), p: prog, counted: &counted, fileID: &fileID})
 	if err != nil {
 		prog.add(-int(counted))
 		return 0, "", err
 	}
-	if n > packageAssetMaxBytes {
+	if n > limit {
 		prog.add(-int(counted))
 		return 0, "", errAssetTooLarge
 	}

@@ -335,6 +335,8 @@ the workspace copy. Inside a pulled workspace, --site_id is optional.`),
 		flags.String("with", "", "Optional data to include: members,form_logs.")
 		flags.String("site_ids", "", "Only export these sites (comma separated).")
 		flags.String("project_id", "", "Project id.")
+		flags.String("skip-assets", "", "Leave these asset files out, by extension or file-name pattern: dmg,exe or '*_setup.exe'.")
+		flags.String("max-asset-size", "", "Leave out asset files larger than this, e.g. 20MB.")
 	}))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"import"}, "import <file.zip>", "Create a project from a package made by creght export.", runImport, func(flags *pflag.FlagSet) {
 		flags.String("name", "", "Name of the new project.")
