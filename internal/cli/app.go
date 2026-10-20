@@ -71,7 +71,12 @@ func clientFromConfig() (*creght.Client, Config, error) {
 		return nil, Config{}, err
 	}
 
-	client := creght.NewClient(cfg.APIHost, cfg.Token)
+	var client *creght.Client
+	if cfg.TokenSource == tokenSourceCommand {
+		client = creght.NewClientWithTokenFunc(cfg.APIHost, cfg.tokenFunc())
+	} else {
+		client = creght.NewClient(cfg.APIHost, cfg.Token)
+	}
 	client.SetAuthHint(authHint(cfg))
 	return client, cfg, nil
 }
@@ -426,7 +431,6 @@ func runPull(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") {
 		printWorkspaceNotice(*dir)
 	}
-	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -543,7 +547,6 @@ func runPush(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") {
 		printWorkspaceNotice(*dir)
 	}
-	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -602,7 +605,6 @@ func runDiff(ctx context.Context, args []string) error {
 	if !flagWasSet(fs, "dir") && !*jsonOut {
 		printWorkspaceNotice(*dir)
 	}
-	warnAPIHostMismatch(*dir)
 
 	projectID, realSiteID, err := parseSiteRef(*siteID)
 	if err != nil {
@@ -748,38 +750,6 @@ func parseSiteRef(ref string) (string, string, error) {
 	}
 
 	return parts[0], parts[1], nil
-}
-
-// warnAPIHostMismatch flags a sync about to run against a different deployment
-// than the workspace was pulled from.
-//
-// The override still applies — an explicit CREGHT_API_HOST outranks the recorded
-// host by design, and that escape hatch is the reason it ranks higher at all.
-// But aiming one site's files at another deployment should not happen silently,
-// so it costs a line on stderr, where it cannot corrupt `diff --json`.
-func warnAPIHostMismatch(root string) {
-	state, hasState, err := loadWorkspaceState(root)
-	if err != nil || !hasState {
-		return
-	}
-	recorded := canonicalAPIHost(strings.TrimSpace(state.APIHost))
-	if recorded == "" {
-		// Pulled by a CLI that did not record the host; there is nothing to
-		// disagree with.
-		return
-	}
-
-	resolved := currentAPIHost()
-	if resolved.Host == recorded {
-		return
-	}
-	if resolved.Source == apiHostSourceEnv {
-		fmt.Fprintf(os.Stderr, "warning: workspace %s was pulled from %s; CREGHT_API_HOST points this command at %s\n",
-			root, recorded, resolved.Host)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "warning: workspace %s was pulled from %s, but this command uses %s (%s)\n",
-		root, recorded, resolved.Host, resolved.describe())
 }
 
 // printWorkspaceNotice reports which discovered workspace root a command

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,10 +16,9 @@ func syncClientFromConfig() (*sitesync.Client, Config, error) {
 	if err != nil {
 		return nil, Config{}, err
 	}
-	token := cfg.Token
 	client, err := sitesync.New(sitesync.Options{
 		Host:  cfg.APIHost,
-		Token: func(context.Context) (string, error) { return token, nil },
+		Token: cfg.tokenFunc(),
 		Log:   os.Stdout,
 	})
 	if err != nil {

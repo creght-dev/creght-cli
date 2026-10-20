@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,17 @@ type Config struct {
 	Tokens  map[string]string `json:"tokens,omitempty"`
 	// TokenSource says where Token came from. Set by loadConfig, never saved.
 	TokenSource tokenSource `json:"-"`
+}
+
+// tokenFunc supplies the token in use per request: from CREGHT_TOKEN_COMMAND,
+// run for this config's host, or the fixed Token otherwise.
+func (cfg Config) tokenFunc() func(context.Context) (string, error) {
+	if cfg.TokenSource == tokenSourceCommand {
+		host := cfg.APIHost
+		return func(ctx context.Context) (string, error) { return commandToken(ctx, host) }
+	}
+	token := cfg.Token
+	return func(context.Context) (string, error) { return token, nil }
 }
 
 func configPath() (string, error) {

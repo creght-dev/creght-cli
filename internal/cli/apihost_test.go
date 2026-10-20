@@ -107,7 +107,10 @@ func TestLoadConfigDiscoversWorkspaceHostFromSubdirectory(t *testing.T) {
 	}
 }
 
-func TestEnvAPIHostOutranksWorkspaceHost(t *testing.T) {
+// A site lives on one deployment, so its workspace outranks CREGHT_API_HOST,
+// which a host program sets once for a project whose sites may be spread
+// across deployments.
+func TestWorkspaceHostOutranksEnvAPIHost(t *testing.T) {
 	useTempConfigDir(t)
 	writeTestConfig(t, `{"api_host":"https://creght.cn"}`)
 	t.Chdir(writeAPIHostWorkspace(t, "p1/s1", "https://talizen.com"))
@@ -117,8 +120,65 @@ func TestEnvAPIHostOutranksWorkspaceHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
+	if cfg.APIHost != "https://talizen.com" {
+		t.Fatalf("APIHost = %q, want the workspace host", cfg.APIHost)
+	}
+}
+
+func TestEnvAPIHostOutranksSavedDefaultOutsideWorkspace(t *testing.T) {
+	useTempConfigDir(t)
+	writeTestConfig(t, `{"api_host":"https://creght.cn"}`)
+	t.Chdir(t.TempDir())
+	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
 	if cfg.APIHost != "http://localhost:8433" {
 		t.Fatalf("APIHost = %q, want the environment override", cfg.APIHost)
+	}
+}
+
+// A command aimed at a site directory with --dir takes that site's host, not
+// the one of wherever it runs from.
+func TestSiteDirHostOutranksWorkingDirectory(t *testing.T) {
+	useTempConfigDir(t)
+	writeTestConfig(t, `{"api_host":"https://creght.cn"}`)
+	t.Chdir(writeAPIHostWorkspace(t, "p1/s1", "https://creght.com"))
+	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
+	site := writeAPIHostWorkspace(t, "p2/s2", "https://talizen.com")
+
+	if _, _, err := resolveSiteWorkspace(site, "", false, true); err != nil {
+		t.Fatalf("resolveSiteWorkspace: %v", err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.APIHost != "https://talizen.com" {
+		t.Fatalf("APIHost = %q, want the --dir workspace's host", cfg.APIHost)
+	}
+}
+
+// A fresh pull into a subdirectory of another workspace is a different site;
+// it must not inherit the surrounding workspace's host.
+func TestFreshSiteDirIgnoresEnclosingWorkspace(t *testing.T) {
+	useTempConfigDir(t)
+	writeTestConfig(t, `{"api_host":"https://creght.cn"}`)
+	outer := writeAPIHostWorkspace(t, "p1/s1", "https://creght.com")
+	t.Chdir(outer)
+	t.Setenv("CREGHT_API_HOST", "https://talizen.com")
+
+	if _, _, err := resolveSiteWorkspace(filepath.Join(outer, "sites", "new"), "p2/s2", false, false); err != nil {
+		t.Fatalf("resolveSiteWorkspace: %v", err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.APIHost != "https://talizen.com" {
+		t.Fatalf("APIHost = %q, want CREGHT_API_HOST", cfg.APIHost)
 	}
 }
 
@@ -275,31 +335,5 @@ func TestConfigGetReportsWorkspaceDiscovery(t *testing.T) {
 	want := "workspace " + root + " auto-discovers https://talizen.com from .creght/state.json"
 	if !strings.Contains(output, want) {
 		t.Fatalf("output = %q, want %q", output, want)
-	}
-}
-
-func TestWarnAPIHostMismatchOnEnvOverride(t *testing.T) {
-	useTempConfigDir(t)
-	root := writeAPIHostWorkspace(t, "p1/s1", "https://talizen.com")
-	t.Chdir(root)
-	t.Setenv("CREGHT_API_HOST", "http://localhost:8433")
-
-	output := captureStderr(t, func() { warnAPIHostMismatch(root) })
-
-	if !strings.Contains(output, "was pulled from https://talizen.com") ||
-		!strings.Contains(output, "http://localhost:8433") {
-		t.Fatalf("stderr = %q, want a mismatch warning", output)
-	}
-}
-
-func TestWarnAPIHostMismatchStaysQuietWhenHostsAgree(t *testing.T) {
-	useTempConfigDir(t)
-	root := writeAPIHostWorkspace(t, "p1/s1", "https://talizen.com")
-	t.Chdir(root)
-
-	output := captureStderr(t, func() { warnAPIHostMismatch(root) })
-
-	if output != "" {
-		t.Fatalf("stderr = %q, want silence", output)
 	}
 }

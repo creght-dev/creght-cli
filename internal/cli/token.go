@@ -24,6 +24,9 @@ const (
 	tokenSourceNone tokenSource = iota
 	tokenSourceSaved
 	tokenSourceEnv
+	// tokenSourceCommand: CREGHT_TOKEN_COMMAND supplies the token, fetched on
+	// the first request; Config.Token stays empty.
+	tokenSourceCommand
 )
 
 func envToken() (string, bool) {
@@ -31,11 +34,15 @@ func envToken() (string, bool) {
 	return v, v != ""
 }
 
-// applyEnvToken lets CREGHT_TOKEN outrank whatever config.json holds for the
-// host. It replaces only the token in use: Tokens is left alone, so nothing
-// that writes the config back can save the borrowed token.
+// applyEnvToken lets CREGHT_TOKEN_COMMAND, then CREGHT_TOKEN, outrank whatever
+// config.json holds for the host. It replaces only the token in use: Tokens is
+// left alone, so nothing that writes the config back can save the borrowed
+// token.
 func applyEnvToken(cfg Config) Config {
-	if token, ok := envToken(); ok {
+	if _, ok := envTokenCommand(); ok {
+		cfg.Token = ""
+		cfg.TokenSource = tokenSourceCommand
+	} else if token, ok := envToken(); ok {
 		cfg.Token = token
 		cfg.TokenSource = tokenSourceEnv
 	}
@@ -47,6 +54,8 @@ func applyEnvToken(cfg Config) Config {
 // `creght whoami` and `creght config get`.
 func describeToken(cfg Config) string {
 	switch cfg.TokenSource {
+	case tokenSourceCommand:
+		return tokenCommandEnvVar + " (" + strings.TrimSpace(os.Getenv(tokenCommandEnvVar)) + " --host <host>)"
 	case tokenSourceEnv:
 		return tokenEnvVar + " environment variable"
 	case tokenSourceSaved:
@@ -63,6 +72,10 @@ func describeToken(cfg Config) string {
 func authHint(cfg Config) string {
 	host := canonicalAPIHost(cfg.APIHost)
 	switch cfg.TokenSource {
+	case tokenSourceCommand:
+		return fmt.Sprintf("The token comes from %s and %s did not accept it. creght does not refresh it; "+
+			"the program behind %s has to hand out a valid token for %s. Unset %s to use the saved login instead.",
+			tokenCommandEnvVar, host, tokenCommandEnvVar, host, tokenCommandEnvVar)
 	case tokenSourceEnv:
 		return fmt.Sprintf("The token comes from %s and %s did not accept it: it has expired, was revoked, "+
 			"or was issued by another Creght deployment. creght does not refresh it; the program that set "+
@@ -76,16 +89,22 @@ func authHint(cfg Config) string {
 }
 
 // refuseEnvToken stops a command that manages the saved login from running
-// while CREGHT_TOKEN is in effect: a login would save a token the variable then
-// overrides, and a logout would revoke a token the CLI does not own.
+// while CREGHT_TOKEN or CREGHT_TOKEN_COMMAND is in effect: a login would save a
+// token the variable then overrides, and a logout would revoke a token the CLI
+// does not own.
 func refuseEnvToken(command string) error {
-	if _, ok := envToken(); !ok {
+	name := ""
+	if _, ok := envTokenCommand(); ok {
+		name = tokenCommandEnvVar
+	} else if _, ok := envToken(); ok {
+		name = tokenEnvVar
+	} else {
 		return nil
 	}
 
 	return fmt.Errorf("creght %s manages the saved login, but the token in use comes from %s; "+
 		"nothing was changed. Unset %s and run creght %s again",
-		command, tokenEnvVar, tokenEnvVar, command)
+		command, name, name, command)
 }
 
 func runWhoami(ctx context.Context, args []string) error {
@@ -141,6 +160,8 @@ func runWhoami(ctx context.Context, args []string) error {
 
 func tokenSourceKey(s tokenSource) string {
 	switch s {
+	case tokenSourceCommand:
+		return "command"
 	case tokenSourceEnv:
 		return "env"
 	case tokenSourceSaved:

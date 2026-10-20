@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/creght-dev/creght-cli/internal/workspace"
 )
 
 // apiHostSource records where the API host a command talks to came from.
@@ -17,8 +19,8 @@ type apiHostSource int
 const (
 	apiHostSourceBuiltin apiHostSource = iota
 	apiHostSourceConfig
-	apiHostSourceWorkspace
 	apiHostSourceEnv
+	apiHostSourceWorkspace
 )
 
 // implicit reports whether the host was discovered rather than chosen.
@@ -54,16 +56,22 @@ func (r resolvedAPIHost) describe() string {
 }
 
 // resolveAPIHost picks the host for this command, most specific first:
-// the environment variable, then the workspace the working directory sits in,
-// then the saved default, then the built-in.
+// the workspace the command works in, then the environment variable, then the
+// saved default, then the built-in.
+//
+// The workspace outranks CREGHT_API_HOST because a site lives on exactly one
+// deployment: a host program sets the variable once for a whole project, whose
+// sites may sit on different deployments, and a site's files sent anywhere but
+// where they were pulled from would reach the wrong account or no site at all.
+// The variable picks the host only for commands outside any workspace.
 //
 // savedHost is the api_host as stored in the config file, unresolved.
 func resolveAPIHost(savedHost string) resolvedAPIHost {
-	if host, ok := envAPIHost(); ok {
-		return resolvedAPIHost{Host: canonicalAPIHost(host), Source: apiHostSourceEnv}
-	}
 	if host, root, ok := discoverWorkspaceAPIHost(); ok {
 		return resolvedAPIHost{Host: host, Source: apiHostSourceWorkspace, Workspace: root}
+	}
+	if host, ok := envAPIHost(); ok {
+		return resolvedAPIHost{Host: canonicalAPIHost(host), Source: apiHostSourceEnv}
 	}
 	if host := canonicalAPIHost(savedHost); host != "" {
 		return resolvedAPIHost{Host: host, Source: apiHostSourceConfig}
@@ -83,20 +91,42 @@ func currentAPIHost() resolvedAPIHost {
 	return resolveAPIHost(saved.APIHost)
 }
 
-// discoverWorkspaceAPIHost walks up from the working directory looking for a
-// pulled workspace, and reports the host it was pulled from.
-//
-// The walk starts at the working directory rather than a command's --dir so
-// that every command follows one rule: the host comes from where you are. A
-// workspace pulled by an older CLI has no recorded host and is skipped, falling
-// back to the saved default exactly as before.
-func discoverWorkspaceAPIHost() (string, string, bool) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", "", false
+// targetWorkspaceDir is the site directory the running command works on, set
+// by resolveSiteWorkspace once a command has settled its --dir. Empty until
+// then, and for commands that work on no site directory.
+var targetWorkspaceDir string
+
+// resolveSiteWorkspace is workspace.ResolveSiteWorkspace that also makes the
+// resolved directory the one the API host is discovered from, so
+// `creght push --dir=sites/a` talks to the deployment sites/a was pulled from
+// wherever it is run.
+func resolveSiteWorkspace(dir string, siteID string, discover bool, requireState bool) (string, string, error) {
+	root, resolvedSiteID, err := workspace.ResolveSiteWorkspace(dir, siteID, discover, requireState)
+	if err == nil {
+		targetWorkspaceDir = root
 	}
 
-	root, state, hasState, err := findWorkspaceState(cwd, true)
+	return root, resolvedSiteID, err
+}
+
+// discoverWorkspaceAPIHost reports the host the command's workspace was
+// pulled from. A command with a site directory asks that directory alone —
+// resolveSiteWorkspace already searched its parents where the command allows
+// it, and a fresh pull into a subdirectory of another workspace must not
+// inherit that workspace's host. Any other command walks up from the working
+// directory. A workspace pulled by an older CLI has no recorded host and is
+// skipped, falling back to CREGHT_API_HOST or the saved default as before.
+func discoverWorkspaceAPIHost() (string, string, bool) {
+	start, searchParents := targetWorkspaceDir, false
+	if start == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", "", false
+		}
+		start, searchParents = cwd, true
+	}
+
+	root, state, hasState, err := findWorkspaceState(start, searchParents)
 	if err != nil || !hasState {
 		return "", "", false
 	}

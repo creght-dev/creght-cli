@@ -93,6 +93,32 @@ CREGHT_API_HOST=https://creght.cn CREGHT_TOKEN=<token> creght pull --site_id=<pi
   would revoke a token the CLI does not own.
 - `creght whoami` (and `creght -h`) show which token is in use.
 
+### Token command
+
+One token serves one deployment until it expires. A program whose user has
+sites on several deployments, or that runs `creght` over a session longer than
+a token lives, sets `CREGHT_TOKEN_COMMAND` instead — a command line, in the
+manner of git's credential helpers, that prints a token for a given host:
+
+```bash
+CREGHT_TOKEN_COMMAND='"/Applications/My App.app/Contents/MacOS/myapp" creght token'
+```
+
+- Once the CLI knows which host the command talks to (see [API Host](#api-host)),
+  it runs the command with `--host <host>` appended — for a site pulled from
+  talizen.com, `"/Applications/My App.app/Contents/MacOS/myapp" creght token --host https://talizen.com` —
+  and sends its stdout, trimmed, as the token.
+- The value is split into words like a shell would (single and double quotes,
+  backslash escapes; on Windows a backslash is always literal, so
+  `"C:\Program Files\My App\myapp.exe" creght token` works) and run directly,
+  never through a shell.
+- It runs at most once per host per `creght` invocation, and only when a
+  request needs a token; `creght -h` never runs it.
+- A non-zero exit fails the command with the helper's stderr as the message,
+  so the helper can say why it has no token for that host.
+- It outranks `CREGHT_TOKEN` and the saved login. `login` and `logout` refuse
+  to run while it is set, as with `CREGHT_TOKEN`.
+
 ## Who am I
 
 ```bash
@@ -100,11 +126,11 @@ creght whoami
 creght whoami --json
 ```
 
-Prints the API host in effect, where the token comes from (`CREGHT_TOKEN`, the
-saved login, or none) and the account it belongs to. It asks the backend, so a
-token that is no longer accepted fails here too. `--json` prints
-`{"api_host","token_source","user"}` with `token_source` one of `env`, `saved`,
-`none`.
+Prints the API host in effect, where the token comes from
+(`CREGHT_TOKEN_COMMAND`, `CREGHT_TOKEN`, the saved login, or none) and the
+account it belongs to. It asks the backend, so a token that is no longer
+accepted fails here too. `--json` prints `{"api_host","token_source","user"}`
+with `token_source` one of `command`, `env`, `saved`, `none`.
 
 ## Logout
 
@@ -114,7 +140,7 @@ Remove the saved CLI login for the current API host:
 creght logout
 ```
 
-`logout` revokes and forgets the token of the API host in effect — `CREGHT_API_HOST`, the workspace's recorded host, or the saved default, resolved the same way as every other command. Other saved hosts remain logged in.
+`logout` revokes and forgets the token of the API host in effect — the workspace's recorded host, `CREGHT_API_HOST`, or the saved default, resolved the same way as every other command. Other saved hosts remain logged in.
 
 Logging out never moves the default API host, not even when the default is the host being logged out of: the next command still talks to that host and asks you to run `creght login`. The config file is deleted only when no token is left and the default is the built-in one.
 
@@ -124,8 +150,8 @@ The host a command talks to is resolved most-specific-first:
 
 | Order | Source | Scope |
 | --- | --- | --- |
-| 1 | `CREGHT_API_HOST` environment variable | the one command it prefixes |
-| 2 | `api_host` in `.creght/state.json`, discovered from the working directory or its parents | that workspace |
+| 1 | `api_host` in `.creght/state.json` of the site directory the command works on (its `--dir`), or else discovered from the working directory or its parents | that workspace |
+| 2 | `CREGHT_API_HOST` environment variable | the one command it prefixes |
 | 3 | the saved default (`creght config set api_host`) | this machine |
 | 4 | the built-in default, `https://creght.cn` | — |
 
@@ -147,13 +173,13 @@ creght diff     # talks to https://talizen.com, no prefix needed
 creght push
 ```
 
-The recorded host is written once, on the first state write, and never rewritten afterwards. That is what keeps a one-off `CREGHT_API_HOST` override from silently repointing a workspace at another deployment. When an override disagrees with the recorded host, `pull`, `diff`, and `push` print a warning on stderr and then honor the override.
+The recorded host is written once, on the first state write, and never rewritten afterwards, and it outranks `CREGHT_API_HOST`: a site lives on one deployment, and a program that sets the variable once for a whole project — whose sites may sit on different deployments — must not send one site's files to another. The variable only decides for commands outside any workspace, and for the first pull into a new directory. A command given `--dir` takes the host of that directory's workspace, wherever it is run from.
 
 Workspaces pulled by CLI versions before auto-discovery have no recorded host and fall through to the saved default, exactly as before. Pulling once records it.
 
 ### Saved default
 
-Commands outside any workspace, and with no environment override, use the saved default — `https://creght.cn` until it is changed. Show it, along with any override or auto-discovery in effect:
+Commands outside any workspace, and with no `CREGHT_API_HOST`, use the saved default — `https://creght.cn` until it is changed. Show it, along with any override or auto-discovery in effect:
 
 ```bash
 creght config get
@@ -848,8 +874,8 @@ Command meanings:
 
 - `login`: Authenticate this machine with Creght and save a CLI token for the current API host.
 - `logout`: Remove the saved CLI login for the current API host.
-- `whoami`: Show the API host in effect, where the token in use comes from (`CREGHT_TOKEN` or the saved login), and whose it is.
-- `config`: Show (`config get`) or change (`config set api_host=<url>`) the saved default API host, used when neither `CREGHT_API_HOST` nor a workspace's recorded host applies.
+- `whoami`: Show the API host in effect, where the token in use comes from (`CREGHT_TOKEN_COMMAND`, `CREGHT_TOKEN` or the saved login), and whose it is.
+- `config`: Show (`config get`) or change (`config set api_host=<url>`) the saved default API host, used when neither a workspace's recorded host nor `CREGHT_API_HOST` applies.
 - `project`: List available projects and sites. Use `project_id/site_id` with site commands. Also supports `project create`.
 - `pull`: Download site files (including Func code under `backend/func/`) into a local workspace, three-way merging remote and local edits.
 - `push`: Push local workspace changes to the remote site/project after a three-way conflict check.

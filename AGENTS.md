@@ -81,10 +81,14 @@ creght version list
 creght version publish <version_no>
 ```
 
-The API host is resolved most-specific-first: `CREGHT_API_HOST`, then the
-`api_host` recorded in `.creght/state.json` by the workspace the working
-directory sits in, then the saved default, then the built-in `https://creght.cn`.
-`creght -h` prints the host in effect and names which of the four it came from.
+The API host is resolved most-specific-first: the `api_host` recorded in
+`.creght/state.json` by the workspace the command works on (the site directory
+a command settles through `resolveSiteWorkspace`, else the one the working
+directory sits in), then `CREGHT_API_HOST`, then the saved default, then the
+built-in `https://creght.cn`. The workspace outranks the variable because a
+host program sets it once per project while the project's sites may live on
+different deployments. `creght -h` prints the host in effect and names which
+of the four it came from.
 
 `CREGHT_API_HOST` applies to the one command it prefixes and never changes the
 saved default or a workspace's recorded host — including on `login`, which saves
@@ -105,6 +109,15 @@ borrowed: the CLI never saves, refreshes or revokes it. `login` and `logout`
 refuse to run while it is set; a 401 carries a hint naming the token's source
 (`authHint`, set on the client by `clientFromConfig`); `creght whoami` and
 `creght -h` say which token is in use.
+
+`CREGHT_TOKEN_COMMAND` outranks both (`internal/cli/token_command.go`): a
+command line, split into words like a shell would but never run through one
+(Windows has none), that the CLI runs with `--host <host>` appended once the
+host is settled, taking its trimmed stdout as the token. It is for a host
+program whose user has sites on several deployments, or whose tokens expire
+mid-session. It runs lazily — only when a request needs a token — and once
+per host per process (`tokenCommandCache`); a non-zero exit fails the command
+with the helper's stderr as the message. `login`/`logout` refuse it too.
 
 ## Site versions
 

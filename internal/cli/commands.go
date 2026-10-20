@@ -41,6 +41,11 @@ func Run(ctx context.Context, args []string) error {
 		return nil
 	}
 
+	// Both are per command; reset so tests running several commands in one
+	// process start clean.
+	targetWorkspaceDir = ""
+	resetTokenCommandCache()
+
 	cmd := newRootCommand(ctx, args)
 	cmd.SetArgs(args)
 	cmd.SetOut(os.Stdout)
@@ -69,7 +74,8 @@ func newRootCommand(ctx context.Context, rawArgs []string) *cobra.Command {
 %s
 %s
 
-Host order: CREGHT_API_HOST, the workspace's .creght/state.json, the saved default, the built-in.
+Host order: the workspace's .creght/state.json (the --dir site, else found from the
+working directory), CREGHT_API_HOST, the saved default, the built-in.
 CREGHT_API_HOST applies to one command and changes nothing saved; creght config set api_host=<url> moves the default.
 
 Credentials file: %s
@@ -80,7 +86,12 @@ login. It is for a program that holds its own Creght token and runs creght for
 the user; pair it with CREGHT_API_HOST so the token goes to the deployment that
 issued it. creght never saves, refreshes or revokes it: when it expires, the
 program that set it has to supply a new one. login and logout refuse to run
-while it is set; creght whoami shows which token is in use.`, helpAPIHostBlock(), helpTokenLine(), helpConfigPath()),
+while it is set; creght whoami shows which token is in use.
+
+CREGHT_TOKEN_COMMAND=<command line> outranks both: once the host is settled the
+CLI runs that command, split like a shell would but without one, with
+--host <host> appended, and uses its stdout as the token. It runs once per host
+per invocation; a non-zero exit fails the command with its stderr.`, helpAPIHostBlock(), helpTokenLine(), helpConfigPath()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version)
@@ -99,13 +110,13 @@ while it is set; creght whoami shows which token is in use.`, helpAPIHostBlock()
 	}))
 	root.AddCommand(configCommand(ctx, rawArgs))
 	root.AddCommand(legacyCommand(ctx, rawArgs, []string{"whoami"}, "whoami", "Show the API host, where the token in use comes from, and whose it is.", runWhoami, func(flags *pflag.FlagSet) {
-		flags.Bool("json", false, `Print {"api_host","token_source","user"} as JSON; token_source is env, saved or none.`)
+		flags.Bool("json", false, `Print {"api_host","token_source","user"} as JSON; token_source is command, env, saved or none.`)
 	},
 		withLong(`Show the API host in effect, where the token in use comes from, and the
 account it belongs to.
 
-The token is CREGHT_TOKEN when that variable is set, otherwise the login saved
-by creght login for this host. whoami asks the backend, so a token it no longer
+The token comes from CREGHT_TOKEN_COMMAND when that variable is set, then
+CREGHT_TOKEN, otherwise the login saved by creght login for this host. whoami asks the backend, so a token it no longer
 accepts fails here with the same message any other command would print. With
 no token at all it prints the host and exits non-zero.`),
 		withExample(`  creght whoami

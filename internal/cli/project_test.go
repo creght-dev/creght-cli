@@ -472,6 +472,9 @@ func useTempConfigDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	targetWorkspaceDir = ""
+	t.Cleanup(func() { targetWorkspaceDir = "" })
+	resetTokenCommandCache()
 
 	path, err := configPath()
 	if err != nil {

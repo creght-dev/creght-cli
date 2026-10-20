@@ -35,7 +35,6 @@ var (
 	statePath                      = workspace.StatePath
 	readBaseObject                 = workspace.ReadBaseObject
 	loadWorkspaceState             = workspace.LoadWorkspaceState
-	resolveSiteWorkspace           = workspace.ResolveSiteWorkspace
 	findWorkspaceState             = workspace.FindWorkspaceState
 	saveWorkspaceState             = workspace.SaveWorkspaceState
 	dropStateFileEntry             = workspace.DropStateFileEntry
